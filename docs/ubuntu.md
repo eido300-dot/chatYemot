@@ -2,7 +2,7 @@
 
 מדריך להתקנה בשרת עם systemd, MariaDB ו־Nginx או Apache. לאג׳נט מתקין יש גם [הוראות עבודה](install-agent.md). יש להתאים את הדומיין, הסודות והתבניות לסביבה הקיימת; אין סקריפט שמחליף אוטומטית את תצורת השרת.
 
-דרישות: Node.js 22 ומעלה עם npm, MariaDB 10.6 ומעלה, FFmpeg, Git ו־HTTPS. נבדק מקומית עם Node 24.22.1, MariaDB 11.4 ו־Chromium; פריסה בשרת המשתמש טרם אומתה.
+דרישות: Node.js 22.9.0 ומעלה עם npm (מומלץ 24 LTS), MariaDB 10.6 ומעלה, FFmpeg, Git ו־HTTPS. פקודות npm משתמשות ב־`--env-file-if-exists`, שנוסף ב־22.9.0; גרסאות 22.0–22.8 אינן מתאימות. נבדק מקומית עם Node 24.22.1, MariaDB 11.4 ו־Chromium; פריסה בשרת המשתמש טרם אומתה.
 
 ## לפני ההתקנה
 
@@ -21,8 +21,8 @@ sudo git clone --branch main https://github.com/eido300-dot/chatYemot.git /opt/c
 sudo chown -R chatyemot:chatyemot /opt/chatyemot
 sudo install -d -o chatyemot -g chatyemot -m 0750 /var/lib/chatyemot
 cd /opt/chatyemot
-sudo -u chatyemot npm ci --omit=dev
-sudo -u chatyemot git log -1 --oneline
+sudo -H -u chatyemot npm ci --omit=dev
+sudo -H -u chatyemot git log -1 --oneline
 ```
 
 אין שלב build. הריצו מופע Node אחד בלבד, ללא cluster, כמה workers או תהליך `npm start` נוסף לצד systemd.
@@ -34,7 +34,11 @@ sudo -u chatyemot git log -1 --oneline
 צרו קובץ הגדרות מוגן מהדוגמה, רק אם אינו קיים:
 
 ```bash
-sudo install -o chatyemot -g chatyemot -m 0600 .env.example /opt/chatyemot/.env
+if sudo test -e /opt/chatyemot/.env; then
+  printf '%s\n' '.env already exists; keep it and review privately.' >&2
+else
+  sudo install -o chatyemot -g chatyemot -m 0600 .env.example /opt/chatyemot/.env
+fi
 ```
 
 ערכו אותו בעורך פרטי ללא הקלטת סודות בתמליל האג׳נט. ההגדרות העיקריות:
@@ -61,7 +65,7 @@ VAPID_PRIVATE_KEY=
 הכינו את הסכימה מתוך `/opt/chatyemot`, באמצעות משתמש השירות:
 
 ```bash
-sudo -u chatyemot npm run db:migrate
+sudo -H -u chatyemot npm run db:migrate
 ```
 
 המיגרציה יוצרת טבלאות חסרות ואינה משנה עמודות קיימות. סקריפטי npm טוענים את `.env` מהתיקייה הנוכחית; שירות systemd טוען אותו באמצעות `EnvironmentFile`.
@@ -74,7 +78,7 @@ sudo -u chatyemot npm run db:migrate
 cd /opt/chatyemot
 read -r -s -p 'New admin password: ' NEW_USER_PASSWORD
 export NEW_USER_PASSWORD
-sudo --preserve-env=NEW_USER_PASSWORD -u chatyemot npm run user -- admin 'מנהל הקבוצה' '' admin
+sudo -H --preserve-env=NEW_USER_PASSWORD -u chatyemot npm run user -- admin 'מנהל הקבוצה' '' admin
 unset NEW_USER_PASSWORD
 ```
 
@@ -90,13 +94,21 @@ unset NEW_USER_PASSWORD
 sudo install -m 0644 deploy/chatyemot.service /etc/systemd/system/chatyemot.service
 ```
 
-בצעו התאמות בקובץ המותקן **לפני** ההפעלה, ואז:
+בצעו התאמות בקובץ המותקן **לפני** ההפעלה. כבר בשלב הזה חסמו גישה חיצונית לפורט 3000 ולמסד בחומת האש המקומית ובחומת האש של ספק הענן, תוך שמירת SSH וגישה מקומית ל־proxy. האפליקציה מאזינה על `0.0.0.0`; אין להפעיל אותה לפני שהחסימה קיימת.
+
+ודאו ששירות MariaDB פעיל וש־Node ו־FFmpeg נגישים למשתמש השירות. אמתו את קובץ השירות לפני הפעלה:
+
+```bash
+sudo systemd-analyze verify /etc/systemd/system/chatyemot.service
+```
+
+פתרו שגיאות אימות, ואז:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now chatyemot
 sudo systemctl status chatyemot --no-pager
-curl --fail --silent --show-error http://127.0.0.1:3000/health
+curl --fail --silent --show-error --max-time 5 --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/health
 ```
 
 השירות רץ כ־`chatyemot`, עם כתיבה ל־`/var/lib/chatyemot` בלבד. אל תריצו את האפליקציה כ־root.
