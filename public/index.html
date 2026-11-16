@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#125c4a" />
+    <title>ChatYemot · השיחה שלנו</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <section id="login" class="login">
+      <div class="brand">◉ <span>ChatYemot</span></div>
+      <div class="intro">
+        <span class="eyebrow">מקום אחד לשיחה שלנו</span>
+        <h1>נשארים בקשר.<br />באתר ובטלפון.</h1>
+        <p>
+          הודעות, קולות ותגובות — שיחה משותפת אחת,<br />מכל מקום ובדרך שנוחה
+          לכם.
+        </p>
+        <div class="illustration">
+          <div class="sample">שלום לכולם, טוב שאתם כאן <span>✓✓</span></div>
+          <div class="sample voice">▶ ▂▅▃▇▅▂▆▃▅▇▂▅ <small>0:24</small></div>
+          <div class="line-badge">☎ מחובר גם לקו הקבוצתי</div>
+        </div>
+      </div>
+      <form id="loginForm">
+        <span class="eyebrow">ברוכים הבאים</span>
+        <h2>כניסה לקבוצה</h2>
+        <p>מרחב פרטי לחברי הקבוצה בלבד</p>
+        <label
+          >שם משתמש<input
+            name="username"
+            autocomplete="username"
+            required
+            maxlength="80" /></label
+        ><label
+          >סיסמה<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            maxlength="256" /></label
+        ><button type="submit" class="primary">נכנסים לשיחה ←</button>
+        <p class="note">אין לכם פרטי כניסה? פנו למנהל הקבוצה.</p>
+        <p id="loginError" role="alert"></p>
+      </form>
+      <footer>השיחה ממשיכה. גם בלי מסך.</footer>
+    </section>
+    <section id="chat" class="shell" hidden>
+      <aside>
+        <div class="brand">◉ <span>ChatYemot</span></div>
+        <p class="eyebrow">המרחב המשותף שלכם</p>
+        <button class="group active">
+          ◌ <span>השיחה שלנו<small>קבוצה סגורה · אתר וטלפון</small></span>
+        </button>
+        <div class="side-note">
+          <span>☎</span>
+          <h3>אותה שיחה, גם בקו</h3>
+          <p>הודעות שסונכרנו זמינות להאזנה בטלפון. הקלטות מהקו מופיעות כאן.</p>
+        </div>
+        <div class="profile">
+          <span id="who"></span
+          ><button id="logout" class="text-button">יציאה</button>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <span class="eyebrow">טוב שאתם כאן</span>
+            <h1>השיחה שלנו <span class="closed">קבוצה פרטית</span></h1>
+          </div>
+          <div class="header-actions">
+            <button id="push">♧ התראות</button
+            ><button id="admin" hidden>ניהול</button
+            ><button id="mobileLogout" aria-label="יציאה מהחשבון">יציאה</button>
+          </div>
+        </header>
+        <div class="toolbar">
+          <label class="search"
+            >⌕
+            <input
+              id="search"
+              placeholder="חיפוש בשיחה…"
+              aria-label="חיפוש בשיחה" /></label
+          ><button id="read">סימון כנקרא ✓</button>
+        </div>
+        <div id="adminPanel" hidden></div>
+        <div id="conversation" class="conversation">
+          <div class="welcome">
+            <span>◌</span>
+            <h2>כאן מדברים יחד</h2>
+            <p>מילים וקולות, מכל מקום.</p>
+          </div>
+          <button id="older" class="older">הודעות קודמות ↑</button>
+          <div id="messages" aria-live="polite"></div>
+          <p id="empty" class="empty">
+            עדיין אין הודעות. אפשר לפתוח את השיחה כאן.
+          </p>
+        </div>
+        <form id="composer" class="composer">
+          <div id="reply" hidden>
+            <span id="replyText"></span
+            ><button type="button" id="cancelReply" aria-label="ביטול תגובה">
+              ×
+            </button>
+          </div>
+          <label class="sr" for="body">הודעה חדשה</label
+          ><textarea
+            id="body"
+            rows="2"
+            maxlength="5000"
+            placeholder="מה תרצו לשתף?"
+          ></textarea>
+          <div class="compose-actions">
+            <div>
+              <button id="record" type="button">◉ הקלטה</button
+              ><label class="attachment"
+                >＋ קובץ שמע<input
+                  id="audio"
+                  type="file"
+                  accept="audio/*"
+                  hidden /></label
+              ><span id="fileLabel"></span
+              ><button type="button" id="clearAudio" hidden>ביטול קובץ</button>
+            </div>
+            <button type="submit" class="primary">שליחה ←</button>
+          </div>
+          <small>פרטי לחברי הקבוצה · הודעות מסונכרנות גם לקו הטלפוני</small>
+        </form>
+      </main>
+    </section>
+    <dialog id="editDialog">
+      <form id="editForm">
+        <h2>עריכת הודעה</h2>
+        <label for="editBody">תוכן ההודעה או התמלול</label
+        ><textarea id="editBody" rows="7" maxlength="5000"></textarea>
+        <div>
+          <button type="button" id="closeEdit">ביטול</button
+          ><button class="primary">שמירה</button>
+        </div>
+        <div id="versions"></div>
+      </form>
+    </dialog>
+  </body>
+</html>

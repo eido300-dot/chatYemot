@@ -1,0 +1,24 @@
+[Unit]
+Description=ChatYemot
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=chatyemot
+Group=chatyemot
+WorkingDirectory=/opt/chatyemot
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/chatyemot/.env
+ExecStart=/usr/bin/node /opt/chatyemot/src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=25
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/chatyemot
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
