@@ -11,6 +11,43 @@
 - אם קיימת התקנה, עברו לסעיף העדכון וגבו אותה. אל תדרסו checkout, מסד או `.env` קיימים.
 - התקינו דרישות חסרות בדרך המאושרת לשרת. בדקו `node --version`, `npm --version`, `mariadb --version` ו־`ffmpeg -version`. נדרש Node הזמין למשתמש השירות בנתיב מערכת, ולא רק דרך nvm בתיקיית הבית של משתמש אחר.
 
+## בחירת פורט פנוי
+
+בהתקנה חדשה בדקו תחילה את השירותים המאזינים עם `sudo ss -ltnp`. אל תעצרו שירות קיים כדי לפנות פורט. למשל, אם שירות אחר משתמש ב־3000, השאירו אותו ואת כללי חומת האש שלו ללא שינוי.
+
+אחרי התקנת Node, הפקודה הבאה בודקת באמצעות bind אמיתי את הטווח 3100–3199 ובוחרת את הפורט הפנוי הראשון. היא פותחת וסוגרת מאזין בדיקה בלבד:
+
+```bash
+CHATYEMOT_PORT="$(node --input-type=module <<'NODE'
+import net from "node:net";
+let selected;
+for (let port = 3100; port <= 3199; port++) {
+  const probe = net.createServer();
+  const available = await new Promise((resolve, reject) => {
+    probe.once("error", (error) => {
+      if (["EADDRINUSE", "EACCES"].includes(error.code)) resolve(false);
+      else reject(error);
+    });
+    probe.listen({ host: "0.0.0.0", port, exclusive: true }, () => {
+      probe.close(() => resolve(true));
+    });
+  });
+  if (available) {
+    selected = port;
+    break;
+  }
+}
+if (!selected) throw Error("No free port in 3100-3199; choose another range without stopping services");
+process.stdout.write(String(selected));
+NODE
+)" || { printf '%s\n' 'Port selection failed; do not start ChatYemot.' >&2; exit 1; }
+export CHATYEMOT_PORT
+```
+
+ודאו שהפקודה הצליחה ושהמשתנה מכיל מספר בטווח שנבדק. העבירו את המספר ל־`PORT` ב־`.env`, לשני יעדי ה־proxy ולבדיקת הבריאות. הבדיקה אינה שומרת את הפורט: בדקו שוב סמוך להפעלה; אם שירות אחר תפס אותו, בחרו פורט אחר ועדכנו את כל ההפניות. אל תהרגו את התהליך שתפס אותו.
+
+שמרו את הפורט ב־`.env` לאורך restarts ועדכונים. בהתקנה קיימת שמרו על הפורט שלה אם הוא עדיין מתאים; אם הוא תפוס, ודאו תחילה אם המאזין הוא מופע ChatYemot הקיים. אין לבצע בחירה חדשה בכל עלייה.
+
 ## 1. קוד ומשתמש שירות
 
 הפקודות הבאות מיועדות להתקנה חדשה בלבד, כששם המשתמש והנתיב עדיין אינם קיימים:
@@ -45,7 +82,7 @@ fi
 
 ```dotenv
 NODE_ENV=production
-PORT=3000
+PORT=3100
 APP_ORIGIN=https://chat.example.com
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -60,7 +97,7 @@ VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 ```
 
-החליפו את הדומיין ואת סיסמת הדוגמה. `APP_ORIGIN` הוא מקור האתר המדויק, ללא נתיב או לוכסן מסיים. שמרו על תאימות ערכי `.env` לטעינה גם ב־Node וגם ב־systemd; לסיסמת מסד שנוצרת אוטומטית אפשר להשתמש בערך אקראי חזק בפורמט hex, ללא תווי ציטוט או רווחים. אין להדפיס את הקובץ, להוסיף אותו ל־Git או למסור אותו בצ׳אט.
+החליפו את הדומיין ואת סיסמת הדוגמה. `3100` הוא דוגמה בלבד: הציבו ב־`PORT` את המספר שנבחר בבדיקת הפורט הפנוי. `APP_ORIGIN` הוא מקור האתר המדויק, ללא נתיב או לוכסן מסיים. שמרו על תאימות ערכי `.env` לטעינה גם ב־Node וגם ב־systemd; לסיסמת מסד שנוצרת אוטומטית אפשר להשתמש בערך אקראי חזק בפורמט hex, ללא תווי ציטוט או רווחים. אין להדפיס את הקובץ, להוסיף אותו ל־Git או למסור אותו בצ׳אט.
 
 הכינו את הסכימה מתוך `/opt/chatyemot`, באמצעות משתמש השירות:
 
@@ -94,7 +131,7 @@ unset NEW_USER_PASSWORD
 sudo install -m 0644 deploy/chatyemot.service /etc/systemd/system/chatyemot.service
 ```
 
-בצעו התאמות בקובץ המותקן **לפני** ההפעלה. כבר בשלב הזה חסמו גישה חיצונית לפורט 3000 ולמסד בחומת האש המקומית ובחומת האש של ספק הענן, תוך שמירת SSH וגישה מקומית ל־proxy. האפליקציה מאזינה על `0.0.0.0`; אין להפעיל אותה לפני שהחסימה קיימת.
+בצעו התאמות בקובץ המותקן **לפני** ההפעלה. כבר בשלב הזה חסמו גישה חיצונית לפורט שנבחר ל־ChatYemot ולמסד בחומת האש המקומית ובחומת האש של ספק הענן, תוך שמירת SSH וגישה מקומית ל־proxy. האפליקציה מאזינה על `0.0.0.0`; אין להפעיל אותה לפני שהחסימה קיימת.
 
 ודאו ששירות MariaDB פעיל וש־Node ו־FFmpeg נגישים למשתמש השירות. אמתו את קובץ השירות לפני הפעלה:
 
@@ -108,27 +145,37 @@ sudo systemd-analyze verify /etc/systemd/system/chatyemot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now chatyemot
 sudo systemctl status chatyemot --no-pager
-curl --fail --silent --show-error --max-time 5 --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/health
+curl --fail --silent --show-error --max-time 5 --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:${CHATYEMOT_PORT:?Set the selected ChatYemot port}/health"
 ```
 
 השירות רץ כ־`chatyemot`, עם כתיבה ל־`/var/lib/chatyemot` בלבד. אל תריצו את האפליקציה כ־root.
 
-## 5. דומיין, HTTPS ורשת
+## 5. כתובת ייעודית, HTTPS ו־reverse proxy
 
-שלבו את [`deploy/nginx.conf.example`](../deploy/nginx.conf.example) בתוך בלוק HTTPS של הדומיין הקיים, והגדירו תעודה תקינה וחידוש אוטומטי. זו תבנית חלקית, ולא קובץ Nginx מלא. היא כוללת הגבלת העלאה ו־reverse proxy אל `127.0.0.1:3000`.
+בחרו עם בעל השרת כתובת ייעודית, למשל `chat.example.com`. בדקו שאין עבורה אתר קיים. הגדירו DNS מסוג A, ו־AAAA רק אם IPv6 מגיע לשרת ומוגן בהתאם; אם אין הרשאת DNS, בקשו את השינוי ואל תטענו שהכתובת כבר פעילה.
+
+צרו אתר או virtual host נפרד לכתובת הזו במנהל השרת הקיים (Nginx או Apache/Webmin). הגדירו תעודת TLS תקינה עם חידוש אוטומטי והפניית HTTP ל־HTTPS. אין לשנות את אתר ברירת המחדל או לנתב דומיינים של שירותים אחרים ל־ChatYemot. התאימו את `APP_ORIGIN` לכתובת הציבורית המדויקת, לדוגמה `https://chat.example.com`.
+
+שלבו את [`deploy/nginx.conf.example`](../deploy/nginx.conf.example) בתוך בלוק HTTPS של דומיין או תת־דומיין ייעודי ל־ChatYemot, והגדירו תעודה תקינה וחידוש אוטומטי. זו תבנית חלקית, ולא קובץ Nginx מלא. היא כוללת הגבלת העלאה ושני יעדי reverse proxy עם הסמן `CHATYEMOT_PORT`. החליפו את שניהם במספר שנבחר. למשל, להצגת מקטע מותאם לשילוב בתצורת האתר:
+
+```bash
+sed "s/CHATYEMOT_PORT/${CHATYEMOT_PORT:?Set the selected ChatYemot port}/g" deploy/nginx.conf.example
+```
+
+אם פתחתם מסוף חדש, הגדירו את המשתנה לפי `PORT` השמור ב־`.env`, בלי להדפיס את יתר ההגדרות.
 
 אם Apache/Webmin מנהל את האתר, הגדירו בו reverse proxy מקביל עם תמיכה בהעלאת שמע ובכותרות forwarded. בדקו תצורה באמצעות `nginx -t` או `apachectl configtest`, לפי השרת, ורק לאחר הצלחה בצעו reload.
 
-אפשרו גישה ציבורית ל־HTTPS, ול־HTTP אם נדרש להפניה או להנפקת תעודות. חסמו גישה חיצונית לפורט 3000 ולמסד גם בחומת האש של ספק הענן, תוך שמירת גישת SSH. האפליקציה מאזינה על `0.0.0.0`, ולכן אין להסתמך על reverse proxy לבדו כחסימה.
+אפשרו גישה ציבורית ל־HTTPS, ול־HTTP אם נדרש להפניה או להנפקת תעודות. חסמו גישה חיצונית לפורט שנבחר ל־ChatYemot ולמסד גם בחומת האש של ספק הענן, תוך שמירת גישת SSH. האפליקציה מאזינה על `0.0.0.0`, ולכן אין להסתמך על reverse proxy לבדו כחסימה.
 
 מנעו רישום הנתיב הסודי `/ivr/…` בלוגים של ה־proxy ושל כל שכבת CDN/WAF; ראו את תבנית Nginx ואת [מדריך האינטגרציות](integrations.md).
 
 ## 6. אימות וקבלת ההתקנה
 
-- בדקו `https://YOUR_DOMAIN/health` והפעלת השירות ללא שגיאות. `/health` בודק את המסד, ולא ספקים או תקינות תור המשימות.
+- בדקו `https://YOUR_DOMAIN/health` בכתובת הייעודית, ובדקו שגם השירותים האחרים נשארו נגישים בכתובות שלהם. ודאו שהשירות פועל ללא שגיאות. `/health` בודק את המסד, ולא ספקים או תקינות תור המשימות.
 - בדקו בדפדפן: כניסת המנהל, שליחת טקסט, תגובה, עריכה, העלאת שמע, האזנה ויציאה. בדקו שהמיקרופון נעצר ביציאה אם נבדקה הקלטה.
 - הפעילו מחדש באמצעות `sudo systemctl restart chatyemot`, ודאו שהנתונים נשמרו ושבדיקת הבריאות עדיין עוברת.
-- ודאו גישה דרך HTTPS וחסימה חיצונית של פורט 3000 והמסד. בדקו את מסך הניהול והגדירו ניטור למשימות `failed` או `uncertain`.
+- ודאו גישה דרך HTTPS וחסימה חיצונית של הפורט שנבחר ל־ChatYemot והמסד. בדקו את מסך הניהול והגדירו ניטור למשימות `failed` או `uncertain`.
 - תעדו את הקומיט, הגרסאות, כתובת האתר ותוצאות האימות. אל תציגו בדיקה שלא הורצה כבדיקה שעברה.
 
 **אין להריץ `npm test`, `npm run test:browser` או `scripts/dev-db.sh` מול סביבת הייצור.** הבדיקות משתמשות במסד ייעודי ששמו מסתיים ב־`_test` ועלולות למחוק את תוכנו.
