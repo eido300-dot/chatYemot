@@ -56,3 +56,5 @@ TEST_DB_NAME=chatyemot_test npm run test:browser
 `npm audit` בעת ההקמה דיווח על 3 ממצאי low בשרשרת כלי Rollup של yemot-router2 (deepmerge). אין תיקון זמין דרך audit. כלי הבנייה הזה אינו מיובא במסלול ESM של האפליקציה. אין להציג את התלויות כנקיות מממצאים.
 
 ראו [התקנת Ubuntu](docs/ubuntu.md), [חיבורי שירותים](docs/integrations.md), [תוצאות אימות](docs/validation.md).
+
+כלי פיתוח לסוכנים: [סקילים של Matt Pocock](docs/agent-skills.md).
