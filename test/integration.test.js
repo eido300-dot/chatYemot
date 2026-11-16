@@ -2,6 +2,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import path from "node:path";
 if (!process.env.TEST_DB_NAME?.endsWith("_test"))
   throw Error(
@@ -110,6 +112,25 @@ test("authentication, origin and CSRF", async () => {
     body: '{"body":"blocked"}',
   });
   assert.equal(blocked.status, 403);
+});
+test("CLI and login share the 12–256 character password policy", async () => {
+  const run = promisify(execFile);
+  for (const length of [11, 257]) {
+    await assert.rejects(run(process.execPath, ["scripts/user.js", "rejected_" + length, "Rejected"], {
+      env: { ...process.env, NEW_USER_PASSWORD: "p".repeat(length), NEW_USER_PIN: "" },
+    }), "CLI must reject a " + length + " character password");
+    assert.equal((await request("/api/login", "POST", {
+      username: "rejected_" + length, password: "p".repeat(length),
+    }, false)).status, 400);
+  }
+  for (const length of [12, 256]) {
+    await run(process.execPath, ["scripts/user.js", "accepted_" + length, "Accepted"], {
+      env: { ...process.env, NEW_USER_PASSWORD: "p".repeat(length), NEW_USER_PIN: "" },
+    });
+    assert.equal((await request("/api/login", "POST", {
+      username: "accepted_" + length, password: "p".repeat(length),
+    }, false)).status, 200);
+  }
 });
 test("messages, replies, edits, conflicts, ownership, versions and search", async () => {
   let res = await request("/api/messages", "POST", { body: "שלום מהאתר" });
@@ -255,6 +276,31 @@ test("ambiguous tzintuk is not retried", async () => {
     "uncertain",
   );
   assert.equal(await worker.tick(), false);
+});
+test("queued tzintuk waits for the current version and edits never notify again", async () => {
+  const events = [];
+  const worker = createWorker({
+    upload: async (m) => {
+      events.push("upload:" + m.version);
+      return "ivr2:/9/" + m.id + "v" + m.version + ".tts";
+    },
+    push: async () => {},
+    tzintuk: async () => events.push("tzintuk"),
+  });
+  const created = await request("/api/messages", "POST", { body: "ממתין לקו" });
+  const messageId = (await created.json()).id;
+  assert.equal(await worker.tick(), true); // Publish v1, enqueue notification.
+  assert.deepEqual(events, ["upload:1"]);
+  assert.equal((await request("/api/messages/" + messageId, "PATCH", {
+    version: 1, body: "גרסה עדכנית לקו",
+  })).status, 200);
+  while (await worker.tick()) {}
+  assert.deepEqual(events, ["upload:1", "upload:2", "tzintuk"]);
+  assert.equal((await request("/api/messages/" + messageId, "PATCH", {
+    version: 2, body: "עוד עריכה ללא התראה",
+  })).status, 200);
+  while (await worker.tick()) {}
+  assert.deepEqual(events, ["upload:1", "upload:2", "tzintuk", "upload:3"]);
 });
 test("IVR invalid menu attempts are bounded", async () => {
   let attempts = 0;

@@ -7,6 +7,8 @@ import {
 import { promisify } from "node:util";
 import { rows } from "./db.js";
 const scrypt = promisify(derive);
+export const validPassword = (value) =>
+  typeof value === "string" && value.length >= 12 && value.length <= 256;
 export const random = () => randomBytes(32).toString("hex");
 export const hash = (v) => createHash("sha256").update(v).digest("hex");
 export async function passwordHash(value) {

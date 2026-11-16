@@ -6,12 +6,24 @@ let csrf,
   file = null,
   editing = null,
   recorder = null,
-  chunks = [],
   poll,
   busy = false,
   searchTimer,
   loading = false,
-  currentSearch = null;
+  currentSearch = null,
+  sessionId = 0;
+const requests = new Set();
+function invalidateSession() {
+  sessionId++;
+  for (const controller of requests) controller.abort();
+  requests.clear();
+}
+function checkSession(id) {
+  if (id !== sessionId) throw new DOMException("Session changed", "AbortError");
+}
+function reportError(error) {
+  if (error.name !== "AbortError") toast(error.message);
+}
 function toast(text) {
   $("toast").textContent = text;
   $("toast").style.display = "block";
@@ -23,25 +35,78 @@ async function api(url, options = {}) {
   if (options.body && !(options.body instanceof FormData))
     headers["Content-Type"] = "application/json";
   if (csrf) headers["X-CSRF-Token"] = csrf;
-  const res = await fetch("/api" + url, {
-    ...options,
-    headers,
-    body:
-      options.body instanceof FormData
-        ? options.body
-        : options.body
-          ? JSON.stringify(options.body)
-          : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    if (res.status === 401 && url !== "/login") showLogin();
-    throw Error(data.error || "הבקשה נכשלה");
+  const session = sessionId;
+  const controller = new AbortController();
+  requests.add(controller);
+  try {
+    const res = await fetch("/api" + url, {
+      ...options,
+      signal: controller.signal,
+      headers,
+      body:
+        options.body instanceof FormData
+          ? options.body
+          : options.body
+            ? JSON.stringify(options.body)
+            : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    checkSession(session);
+    if (!res.ok) {
+      if (res.status === 401 && url !== "/login") {
+        showLogin();
+        checkSession(session);
+      }
+      throw Error(data.error || "הבקשה נכשלה");
+    }
+    return data;
+  } catch (error) {
+    checkSession(session);
+    throw error;
+  } finally {
+    requests.delete(controller);
   }
-  return data;
 }
 function showLogin() {
+  invalidateSession();
   clearInterval(poll);
+  clearTimeout(searchTimer);
+  clearTimeout(toast.timer);
+  const active = recorder;
+  recorder = null;
+  if (active) {
+    clearTimeout(active.timer);
+    if (active.state !== "inactive") active.stop();
+    active.stream.getTracks().forEach((track) => track.stop());
+  }
+  for (const audio of $("messages").querySelectorAll("audio")) {
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+  }
+  $("composer").reset();
+  $("loginForm").reset();
+  $("loginForm").querySelector("button[type=submit]").disabled = false;
+  $("editForm").reset();
+  $("editDialog").close();
+  editing = null;
+  clearReply();
+  $("replyText").textContent = "";
+  selectFile(null);
+  $("versions").textContent = "";
+  $("adminPanel").replaceChildren();
+  $("adminPanel").hidden = true;
+  $("admin").hidden = true;
+  $("who").textContent = "";
+  $("search").value = "";
+  $("loginError").textContent = "";
+  $("toast").textContent = "";
+  $("toast").style.display = "none";
+  $("record").textContent = "◉ הקלטה";
+  $("record").disabled = false;
+  $("composer").querySelector("[type=submit]").disabled = false;
+  busy = false;
+  loading = false;
   $("login").hidden = false;
   $("chat").hidden = true;
   user = null;
@@ -51,6 +116,7 @@ function showLogin() {
   csrf = null;
 }
 async function enter(data) {
+  invalidateSession();
   csrf = data.csrf;
   user = data.user;
   $("login").hidden = true;
@@ -60,12 +126,13 @@ async function enter(data) {
   await refresh();
   clearInterval(poll);
   poll = setInterval(() => {
-    if (!document.hidden && !loading) refresh().catch((e) => toast(e.message));
+    if (!document.hidden && !loading) refresh().catch((e) => reportError(e));
   }, 10000);
 }
 $("loginForm").onsubmit = async (e) => {
   e.preventDefault();
   const button = e.submitter;
+  let session = sessionId;
   button.disabled = true;
   try {
     const data = await api("/login", {
@@ -73,11 +140,13 @@ $("loginForm").onsubmit = async (e) => {
       body: Object.fromEntries(new FormData(e.target)),
     });
     e.target.reset();
-    await enter(data);
+    const entering = enter(data);
+    session = sessionId;
+    await entering;
   } catch (e) {
-    $("loginError").textContent = e.message;
+    if (e.name !== "AbortError") $("loginError").textContent = e.message;
   } finally {
-    button.disabled = false;
+    if (session === sessionId) button.disabled = false;
   }
 };
 function el(tag, className, text) {
@@ -171,6 +240,7 @@ function renderMessage(m) {
 async function refresh(older = false) {
   if (loading || !user) return;
   loading = true;
+  const session = sessionId;
   try {
     const firstLoad = messages.length === 0;
     const nearBottom =
@@ -179,20 +249,35 @@ async function refresh(older = false) {
         $("conversation").clientHeight <
       150;
     const query = $("search").value.trim();
+    const sameSearch = currentSearch === query;
+    const oldest = messages.length ? Math.min(...messages.map((m) => m.id)) : null;
+    const scroller = $("conversation");
+    const anchor = [...$("messages").children].find(
+      (node) => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top,
+    );
+    const anchorTop = anchor?.getBoundingClientRect().top;
     const params = new URLSearchParams();
     if ($("search").value.trim())
       params.set("search", $("search").value.trim());
     if (older && messages.length)
       params.set("before", Math.min(...messages.map((m) => m.id)));
-    const data = await api("/messages?" + params);
+    let page = await api("/messages?" + params);
+    const data = [...page];
+    // Refresh every loaded page, including search history, using the existing cursor.
+    while (!older && sameSearch && oldest && page.length === 50 && page.at(-1).id > oldest) {
+      params.set("before", page.at(-1).id);
+      page = await api("/messages?" + params);
+      data.push(...page);
+    }
     if (!user) return;
     const map = new Map(
-      (older || (!query && currentSearch === query) ? messages : []).map(
+      (older && sameSearch ? messages : []).map(
         (m) => [m.id, m],
       ),
     );
     currentSearch = query;
-    for (const m of data) map.set(m.id, m);
+    for (const m of data)
+      if (older || !sameSearch || !oldest || m.id >= oldest) map.set(m.id, m);
     messages = [...map.values()].sort((a, b) => a.id - b.id);
     const old = new Map([...$("messages").children].map((n) => [n.id, n]));
     let position = 0;
@@ -235,21 +320,26 @@ async function refresh(older = false) {
     }
     for (const node of old.values()) node.remove();
     $("empty").hidden = messages.length > 0;
-    $("older").hidden = data.length < 50;
+    if (older || !sameSearch || !oldest)
+      $("older").hidden = page.length < 50;
+    else
+      $("older").hidden = page.length < 50 && !data.some((m) => m.id < oldest);
     $("read").textContent = messages.some((m) => m.id > user.last_read)
       ? "סימון כנקרא ✓"
       : "הכול נקרא ✓";
     if (!older && (nearBottom || firstLoad)) {
       $("conversation").scrollTop = $("conversation").scrollHeight;
+    } else if (anchor && $(anchor.id)) {
+      scroller.scrollTop += $(anchor.id).getBoundingClientRect().top - anchorTop;
     }
   } finally {
-    loading = false;
+    if (session === sessionId) loading = false;
   }
 }
-$("older").onclick = () => refresh(true).catch((e) => toast(e.message));
+$("older").onclick = () => refresh(true).catch((e) => reportError(e));
 $("search").oninput = () => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => refresh().catch((e) => toast(e.message)), 350);
+  searchTimer = setTimeout(() => refresh().catch((e) => reportError(e)), 350);
 };
 async function openEdit(m) {
   editing = m;
@@ -263,7 +353,7 @@ async function openEdit(m) {
         .map((v) => "גרסה " + v.version + " · " + (v.transcript || v.body))
         .join("\n\n");
   } catch (e) {
-    toast(e.message);
+    reportError(e);
   }
 }
 $("closeEdit").onclick = () => $("editDialog").close();
@@ -283,7 +373,7 @@ $("editForm").onsubmit = async (e) => {
     await refresh();
     toast("השינויים נשמרו");
   } catch (e) {
-    toast(e.message);
+    reportError(e);
   }
 };
 function selectFile(value) {
@@ -314,32 +404,54 @@ $("record").onclick = async () => {
     toast("הקלטה דורשת HTTPS ודפדפן תומך. אפשר לצרף קובץ שמע.");
     return;
   }
+  const session = sessionId;
+  let stream;
+  $("record").disabled = true;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    chunks = [];
-    recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = (e) => {
-      if (e.data.size) chunks.push(e.data);
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (session !== sessionId || !user) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    const chunks = [];
+    const active = new MediaRecorder(stream);
+    recorder = active;
+    const isCurrent = () => session === sessionId && recorder === active;
+    active.ondataavailable = (e) => {
+      if (isCurrent() && e.data.size) chunks.push(e.data);
     };
-    recorder.onstop = () => {
-      clearTimeout(recorder.timer);
-      const blob = new Blob(chunks, { type: recorder.mimeType });
-      stream.getTracks().forEach((t) => t.stop());
+    active.onstop = () => {
+      clearTimeout(active.timer);
+      stream.getTracks().forEach((track) => track.stop());
+      if (!isCurrent()) return;
+      const blob = new Blob(chunks, { type: active.mimeType });
+      recorder = null;
       selectFile(new File([blob], "recording.webm", { type: blob.type }));
       $("record").textContent = "◉ הקלטה";
       $("record").disabled = false;
     };
-    recorder.onerror = () => {
-      stream.getTracks().forEach((t) => t.stop());
+    active.onerror = () => {
+      clearTimeout(active.timer);
+      stream.getTracks().forEach((track) => track.stop());
+      if (!isCurrent()) return;
+      recorder = null;
+      $("record").textContent = "◉ הקלטה";
+      $("record").disabled = false;
       toast("ההקלטה נכשלה");
     };
-    recorder.start();
-    recorder.timer = setTimeout(() => {
-      if (recorder.state === "recording") recorder.stop();
+    active.start();
+    active.timer = setTimeout(() => {
+      if (isCurrent() && active.state === "recording") active.stop();
     }, 180000);
     $("record").textContent = "■ סיום הקלטה";
+    $("record").disabled = false;
   } catch {
-    toast("לא התקבלה גישה למיקרופון");
+    stream?.getTracks().forEach((track) => track.stop());
+    if (session === sessionId) {
+      recorder = null;
+      $("record").disabled = false;
+      toast("לא התקבלה גישה למיקרופון");
+    }
   }
 };
 $("composer").onsubmit = async (e) => {
@@ -354,6 +466,7 @@ $("composer").onsubmit = async (e) => {
     toast("שלחו את הטקסט ואת ההקלטה כהודעות נפרדות");
     return;
   }
+  const session = sessionId;
   busy = true;
   e.submitter.disabled = true;
   try {
@@ -374,10 +487,12 @@ $("composer").onsubmit = async (e) => {
     await refresh();
     $("conversation").scrollTop = $("conversation").scrollHeight;
   } catch (e) {
-    toast(e.message);
+    reportError(e);
   } finally {
-    busy = false;
-    e.submitter.disabled = false;
+    if (session === sessionId) {
+      busy = false;
+      e.submitter.disabled = false;
+    }
   }
 };
 $("read").onclick = async () => {
@@ -387,10 +502,11 @@ $("read").onclick = async () => {
     user.last_read = id;
     await refresh();
   } catch (e) {
-    toast(e.message);
+    reportError(e);
   }
 };
 $("push").onclick = async () => {
+  const session = sessionId;
   try {
     const { pushKey } = await api("/config");
     if (!pushKey) throw Error("התראות פוש עדיין לא הוגדרו על ידי המנהל");
@@ -398,7 +514,9 @@ $("push").onclick = async () => {
       throw Error("הדפדפן אינו תומך בפוש");
     if ((await Notification.requestPermission()) !== "granted")
       throw Error("לא התקבל אישור להתראות");
+    checkSession(session);
     const registration = await navigator.serviceWorker.ready;
+    checkSession(session);
     const bytes = Uint8Array.from(
       atob(pushKey.replace(/-/g, "+").replace(/_/g, "/")),
       (c) => c.charCodeAt(0),
@@ -409,29 +527,38 @@ $("push").onclick = async () => {
         userVisibleOnly: true,
         applicationServerKey: bytes,
       }));
+    checkSession(session);
     await api("/push", { method: "POST", body: sub.toJSON() });
     toast("ההתראות הופעלו");
   } catch (e) {
-    toast(e.message);
+    reportError(e);
   }
 };
 $("logout").onclick = async () => {
+  const headers = { "X-CSRF-Token": csrf };
+  showLogin();
+  // Finish invalidating the cookie before allowing another account to log in.
+  const button = $("loginForm").querySelector("button[type=submit]");
+  button.disabled = true;
   try {
-    const reg = await navigator.serviceWorker?.getRegistration();
-    const sub = await reg?.pushManager.getSubscription();
-    if (sub) {
-      await api("/push", {
-        method: "DELETE",
-        body: { endpoint: sub.endpoint },
-      }).catch(() => {});
-      await sub.unsubscribe().catch(() => {});
-    }
-  } catch {}
-  try {
-    await api("/logout", { method: "POST" });
-    showLogin();
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) {
+        await fetch("/api/push", {
+          method: "DELETE",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
+      }
+    } catch {}
+    const res = await fetch("/api/logout", { method: "POST", headers });
+    if (!res.ok && res.status !== 401) throw Error("היציאה נכשלה. נסו שוב");
   } catch (e) {
-    toast(e.message);
+    reportError(e);
+  } finally {
+    button.disabled = false;
   }
 };
 $("mobileLogout").onclick = () => $("logout").click();
@@ -456,11 +583,11 @@ $("admin").onclick = async () => {
     for (const j of data.jobs)
       panel.append(el("p", "", j.type + " · " + j.state + " · " + j.count));
   } catch (e) {
-    toast(e.message);
+    reportError(e);
   }
 };
 if ("serviceWorker" in navigator)
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 api("/me")
   .then(enter)
-  .catch(() => showLogin());
+  .catch((e) => { if (e.name !== "AbortError") showLogin(); });

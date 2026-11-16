@@ -14,6 +14,7 @@ import {
   allowedAttempt,
   fail,
   validSubscription,
+  validPassword,
 } from "./security.js";
 import { listMessages, createMessage, editMessage } from "./messages.js";
 import { prepareMedia, convert, mediaPath } from "./media.js";
@@ -91,8 +92,7 @@ export async function createApp() {
       const { username, password } = req.body;
       if (
         typeof username !== "string" ||
-        typeof password !== "string" ||
-        password.length > 256
+        !validPassword(password)
       )
         throw fail(400, "פרטים לא תקינים");
       if (!(await allowedAttempt("web:" + username.toLowerCase())))

@@ -81,7 +81,10 @@ export function createWorker(adapters = {}) {
         await enqueue(c, "transcribe", m.id, 1);
       });
     }
-    if (job.type === "tzintuk") await remote.tzintuk();
+    if (job.type === "tzintuk") {
+      if (!m.yemot_path || m.synced_version !== m.version) return false;
+      await remote.tzintuk();
+    }
     if (job.type === "push")
       await (adapters.push ? adapters.push(job) : notify(job));
     if (job.type === "transcribe" && m.media && !m.transcript_manual) {
@@ -119,7 +122,11 @@ export function createWorker(adapters = {}) {
     if (!enabled.length) return false;
     const job = await transaction(async (c) => {
       const [list] = await c.query(
-        `SELECT * FROM jobs WHERE state='pending' AND available_at<=NOW(3) AND type IN (?) ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        `SELECT j.* FROM jobs j WHERE j.state='pending' AND j.available_at<=NOW(3) AND j.type IN (?)
+         AND (j.type<>'tzintuk' OR EXISTS (
+           SELECT 1 FROM messages m WHERE m.id=j.message_id
+           AND m.yemot_path IS NOT NULL AND m.synced_version=m.version
+         )) ORDER BY j.id LIMIT 1 FOR UPDATE SKIP LOCKED`,
         [enabled],
       );
       if (!list[0]) return null;
@@ -131,7 +138,11 @@ export function createWorker(adapters = {}) {
     });
     if (!job) return false;
     try {
-      await run(job);
+      if ((await run(job)) === false) {
+        // An edit may have landed after claiming the job. No delivery was attempted.
+        await rows("UPDATE jobs SET state='pending',attempts=attempts-1 WHERE id=?", [job.id]);
+        return true;
+      }
       await rows("UPDATE jobs SET state='done',error=NULL WHERE id=?", [
         job.id,
       ]);

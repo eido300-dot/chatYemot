@@ -1,15 +1,14 @@
 import { rows, db } from "../src/db.js";
-import { passwordHash, normalizePhone } from "../src/security.js";
+import { passwordHash, normalizePhone, validPassword } from "../src/security.js";
 const [username, name, phone, role] = process.argv.slice(2);
 try {
   if (
     !username ||
     !name ||
-    !process.env.NEW_USER_PASSWORD ||
-    process.env.NEW_USER_PASSWORD.length < 12
+    !validPassword(process.env.NEW_USER_PASSWORD)
   )
     throw Error(
-      "Usage: NEW_USER_PASSWORD (>=12 chars), optional NEW_USER_PIN (6-12 digits), npm run user -- username name phone [admin]",
+      "Usage: NEW_USER_PASSWORD (12-256 chars), optional NEW_USER_PIN (6-12 digits), npm run user -- username name phone [admin]",
     );
   if (process.env.NEW_USER_PIN && !/^\d{6,12}$/.test(process.env.NEW_USER_PIN))
     throw Error("PIN must contain 6-12 digits");
