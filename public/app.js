@@ -125,6 +125,8 @@ async function enter(data) {
   $("admin").hidden = !user.admin;
   await refresh();
   applyPendingReply();
+  // Re-register this device after login if notifications were already allowed.
+  subscribePush(sessionId, false).catch(() => {});
   clearInterval(poll);
   poll = setInterval(() => {
     if (!document.hidden && !loading) refresh().catch((e) => reportError(e));
@@ -531,31 +533,39 @@ $("read").onclick = async () => {
     reportError(e);
   }
 };
+async function subscribePush(session, interactive) {
+  const { pushKey } = await api("/config");
+  if (!pushKey) {
+    if (interactive) throw Error("התראות פוש עדיין לא הוגדרו על ידי המנהל");
+    return false;
+  }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    if (interactive) throw Error("הדפדפן אינו תומך בפוש");
+    return false;
+  }
+  if (interactive && (await Notification.requestPermission()) !== "granted")
+    throw Error("לא התקבל אישור להתראות");
+  if (Notification.permission !== "granted") return false;
+  checkSession(session);
+  const registration = await navigator.serviceWorker.ready;
+  checkSession(session);
+  const bytes = Uint8Array.from(
+    atob(pushKey.replace(/-/g, "+").replace(/_/g, "/")),
+    (c) => c.charCodeAt(0),
+  );
+  const sub =
+    (await registration.pushManager.getSubscription()) ||
+    (await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: bytes,
+    }));
+  checkSession(session);
+  await api("/push", { method: "POST", body: sub.toJSON() });
+  return true;
+}
 $("push").onclick = async () => {
-  const session = sessionId;
   try {
-    const { pushKey } = await api("/config");
-    if (!pushKey) throw Error("התראות פוש עדיין לא הוגדרו על ידי המנהל");
-    if (!("serviceWorker" in navigator) || !("PushManager" in window))
-      throw Error("הדפדפן אינו תומך בפוש");
-    if ((await Notification.requestPermission()) !== "granted")
-      throw Error("לא התקבל אישור להתראות");
-    checkSession(session);
-    const registration = await navigator.serviceWorker.ready;
-    checkSession(session);
-    const bytes = Uint8Array.from(
-      atob(pushKey.replace(/-/g, "+").replace(/_/g, "/")),
-      (c) => c.charCodeAt(0),
-    );
-    const sub =
-      (await registration.pushManager.getSubscription()) ||
-      (await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: bytes,
-      }));
-    checkSession(session);
-    await api("/push", { method: "POST", body: sub.toJSON() });
-    toast("ההתראות הופעלו");
+    if (await subscribePush(sessionId, true)) toast("ההתראות הופעלו");
   } catch (e) {
     reportError(e);
   }

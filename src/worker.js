@@ -51,7 +51,7 @@ export function createWorker(adapters = {}) {
         await webpush.sendNotification(
           subscription,
           payload,
-          { TTL: 3600, timeout: 15000 },
+          { TTL: 3600, urgency: "high", timeout: 15000 },
         );
       } catch (e) {
         if (e.statusCode === 404 || e.statusCode === 410)
