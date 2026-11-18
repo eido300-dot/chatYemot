@@ -30,7 +30,7 @@ object Notifier {
 
     /** מציג התראה על הודעות חדשות של אחרים (נקרא מ-FCM). */
     fun fetchAndShow(ctx: Context) {
-        if (!Api.init()) return
+        if (!Api.init()) { showGeneric(ctx); return }
         val prefs = ctx.getSharedPreferences("svc", Context.MODE_PRIVATE)
         var last = prefs.getLong("last", -1)
         val a = Api.messages()
@@ -41,6 +41,24 @@ object Notifier {
             if (m.getLong("user_id") != Api.myId && !appVisible) show(ctx, m)
         }
         prefs.edit().putLong("last", last).apply()
+    }
+
+    /** גיבוי: אם השליפה נכשלה (רשת, session שפג) עדיין מציגים התראה, כדי שאנדרואיד לא יוריד עדיפות. */
+    fun showGeneric(ctx: Context) {
+        if (appVisible) return
+        ensureChannel(ctx)
+        val open = PendingIntent.getActivity(
+            ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        ctx.getSystemService(NotificationManager::class.java).notify(
+            1, NotificationCompat.Builder(ctx, CH_MSG)
+                .setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setContentTitle("צ'אטייב")
+                .setContentText("הודעה חדשה. פתחו את האפליקציה.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(open).setAutoCancel(true).build()
+        )
     }
 
     fun show(ctx: Context, m: JSONObject) {

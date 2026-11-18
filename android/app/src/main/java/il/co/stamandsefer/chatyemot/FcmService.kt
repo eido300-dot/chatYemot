@@ -10,6 +10,7 @@ class FcmService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        if (message.data["type"] == "message") runCatching { Notifier.fetchAndShow(this) }
+        if (message.data["type"] == "message")
+            runCatching { Notifier.fetchAndShow(this) }.onFailure { Notifier.showGeneric(this) }
     }
 }
