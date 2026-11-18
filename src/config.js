@@ -28,6 +28,7 @@ export const config = {
     publicKey: e.VAPID_PUBLIC_KEY,
     privateKey: e.VAPID_PRIVATE_KEY,
     subject: e.VAPID_SUBJECT || "mailto:admin@example.com",
+    showContent: e.PUSH_SHOW_CONTENT !== "false",
   },
   transcription: e.TRANSCRIPTION_ENABLED === "true",
   openai: e.OPENAI_API_KEY,

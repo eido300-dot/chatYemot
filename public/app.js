@@ -124,6 +124,7 @@ async function enter(data) {
   $("who").textContent = user.name;
   $("admin").hidden = !user.admin;
   await refresh();
+  applyPendingReply();
   clearInterval(poll);
   poll = setInterval(() => {
     if (!document.hidden && !loading) refresh().catch((e) => reportError(e));
@@ -162,6 +163,31 @@ function setReply(m) {
     "תגובה ל" + m.name + ": " + (m.body || "הקלטה").slice(0, 120);
   $("body").focus();
 }
+let pendingReply = new URLSearchParams(location.search).get("reply");
+if (pendingReply) history.replaceState(null, "", "/");
+async function applyPendingReply() {
+  const id = pendingReply;
+  pendingReply = null;
+  if (!id || !user) return;
+  let m = messages.find((x) => String(x.id) === String(id));
+  if (!m) {
+    try {
+      m = (await api("/messages?before=" + (Number(id) + 1))).find(
+        (x) => String(x.id) === String(id),
+      );
+    } catch (e) {
+      return reportError(e);
+    }
+  }
+  if (m) setReply(m);
+}
+if ("serviceWorker" in navigator)
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data && e.data.type === "reply-to") {
+      pendingReply = e.data.id;
+      applyPendingReply();
+    }
+  });
 function clearReply() {
   reply = null;
   $("reply").hidden = true;

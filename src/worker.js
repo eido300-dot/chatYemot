@@ -20,21 +20,37 @@ export function createWorker(adapters = {}) {
       config.push.privateKey,
     );
   async function notify(job) {
+    const m = (
+      await rows(
+        "SELECT m.id,m.user_id,m.kind,m.body,m.transcript,u.name FROM messages m JOIN users u ON u.id=m.user_id WHERE m.id=?",
+        [job.message_id],
+      )
+    )[0];
+    if (!m) return;
+    const text =
+      m.kind === "audio" ? m.transcript || "הודעה קולית" : m.body || "";
+    const payload = JSON.stringify(
+      config.push.showContent
+        ? {
+            title: m.name,
+            body: text.length > 140 ? text.slice(0, 137) + "…" : text,
+            id: m.id,
+            reply: true,
+          }
+        : { title: "ChatYemot", body: "הודעה חדשה בקבוצה", id: m.id },
+    );
     const subscriptions = await rows(
       "SELECT s.* FROM push_subscriptions s JOIN users u ON u.id=s.user_id WHERE u.active=1",
     );
     let uncertain = false;
     for (const s of subscriptions) {
+      if (s.user_id === m.user_id) continue;
       const subscription = JSON.parse(s.subscription);
       if (!validSubscription(subscription)) continue;
       try {
         await webpush.sendNotification(
           subscription,
-          JSON.stringify({
-            title: "ChatYemot",
-            body: "הודעה חדשה בקבוצה",
-            id: job.message_id,
-          }),
+          payload,
           { TTL: 3600, timeout: 15000 },
         );
       } catch (e) {
