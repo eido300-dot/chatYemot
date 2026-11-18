@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.ChatYemot" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#008069</item>
+        <item name="android:navigationBarColor">#efeae2</item>
+        <item name="android:windowBackground">#efeae2</item>
+    </style>
+</resources>
