@@ -9,12 +9,13 @@ let csrf,
   poll,
   busy = false,
   searchTimer,
-  loading = false,
+  scheduleMessageRefresh = null,
   currentSearch = null,
   sessionId = 0;
 const requests = new Set();
 function invalidateSession() {
   sessionId++;
+  scheduleMessageRefresh = null;
   for (const controller of requests) controller.abort();
   requests.clear();
 }
@@ -106,7 +107,6 @@ function showLogin() {
   $("record").disabled = false;
   $("composer").querySelector("[type=submit]").disabled = false;
   busy = false;
-  loading = false;
   $("login").hidden = false;
   $("chat").hidden = true;
   user = null;
@@ -117,6 +117,8 @@ function showLogin() {
 }
 async function enter(data) {
   invalidateSession();
+  const session = sessionId;
+  scheduleMessageRefresh = createMessageRefresh(session);
   csrf = data.csrf;
   user = data.user;
   $("login").hidden = true;
@@ -124,9 +126,10 @@ async function enter(data) {
   $("who").textContent = user.name;
   $("admin").hidden = !user.admin;
   await refresh();
+  checkSession(session);
   clearInterval(poll);
   poll = setInterval(() => {
-    if (!document.hidden && !loading) refresh().catch((e) => reportError(e));
+    if (!document.hidden) refresh({ poll: true }).catch(reportError);
   }, 10000);
 }
 $("loginForm").onsubmit = async (e) => {
@@ -237,18 +240,22 @@ function renderMessage(m) {
   card.append(actions);
   return card;
 }
-async function refresh(older = false) {
-  if (loading || !user) return;
-  loading = true;
-  const session = sessionId;
-  try {
+function refresh(options) {
+  return scheduleMessageRefresh?.(options) ?? Promise.resolve();
+}
+const searchQuery = () => $("search").value.trim();
+function createMessageRefresh(session) {
+  let tail = Promise.resolve();
+  let running = false;
+  const queued = new Map();
+
+  async function loadMessages(query, older) {
     const firstLoad = messages.length === 0;
     const nearBottom =
       $("conversation").scrollHeight -
         $("conversation").scrollTop -
         $("conversation").clientHeight <
       150;
-    const query = $("search").value.trim();
     const sameSearch = currentSearch === query;
     const oldest = messages.length ? Math.min(...messages.map((m) => m.id)) : null;
     const scroller = $("conversation");
@@ -257,19 +264,22 @@ async function refresh(older = false) {
     );
     const anchorTop = anchor?.getBoundingClientRect().top;
     const params = new URLSearchParams();
-    if ($("search").value.trim())
-      params.set("search", $("search").value.trim());
-    if (older && messages.length)
-      params.set("before", Math.min(...messages.map((m) => m.id)));
+    if (query) params.set("search", query);
+    if (older) params.set("before", oldest);
+    const stillRelevant = () => {
+      checkSession(session);
+      return query === searchQuery();
+    };
     let page = await api("/messages?" + params);
+    if (!stillRelevant()) return;
     const data = [...page];
     // Refresh every loaded page, including search history, using the existing cursor.
     while (!older && sameSearch && oldest && page.length === 50 && page.at(-1).id > oldest) {
       params.set("before", page.at(-1).id);
       page = await api("/messages?" + params);
+      if (!stillRelevant()) return;
       data.push(...page);
     }
-    if (!user) return;
     const map = new Map(
       (older && sameSearch ? messages : []).map(
         (m) => [m.id, m],
@@ -332,11 +342,37 @@ async function refresh(older = false) {
     } else if (anchor && $(anchor.id)) {
       scroller.scrollTop += $(anchor.id).getBoundingClientRect().top - anchorTop;
     }
-  } finally {
-    if (session === sessionId) loading = false;
   }
+
+  return function schedule({ older = false, poll = false } = {}) {
+    if (poll && (running || queued.size)) return Promise.resolve();
+    const query = searchQuery();
+    // A cursor only belongs to the search currently displayed.
+    const loadOlder = older && currentSearch === query && messages.length > 0;
+    const pending = queued.get(loadOlder);
+    if (pending) {
+      pending.query = query;
+      return pending.done;
+    }
+    const request = { query, done: null };
+    request.done = tail.then(async () => {
+      queued.delete(loadOlder);
+      checkSession(session);
+      if (request.query !== searchQuery()) return;
+      running = true;
+      try {
+        await loadMessages(request.query, loadOlder && currentSearch === request.query);
+      } finally {
+        running = false;
+      }
+    });
+    queued.set(loadOlder, request);
+    // A failed request must not prevent later refreshes.
+    tail = request.done.catch(() => {});
+    return request.done;
+  };
 }
-$("older").onclick = () => refresh(true).catch((e) => reportError(e));
+$("older").onclick = () => refresh({ older: true }).catch(reportError);
 $("search").oninput = () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => refresh().catch((e) => reportError(e)), 350);
