@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { openAsBlob } from "node:fs";
 import { mkdir, unlink, stat } from "node:fs/promises";
 import path from "node:path";
 import { random } from "./security.js";
@@ -10,6 +11,9 @@ export async function prepareMedia() {
 export function mediaPath(name) {
   if (!/^[a-f0-9]{64}\.wav$/.test(name)) throw Error("Invalid media name");
   return path.join(config.data, "media", name);
+}
+export function openMedia(name) {
+  return openAsBlob(mediaPath(name), { type: "audio/wav" });
 }
 export async function convert(input) {
   const name = random() + ".wav",

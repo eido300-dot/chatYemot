@@ -1,11 +1,11 @@
 import webpush from "web-push";
-import { writeFile, unlink, readFile } from "node:fs/promises";
+import { writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { db, rows, transaction } from "./db.js";
 import { enqueue } from "./messages.js";
 import { config } from "./config.js";
 import { random, validSubscription } from "./security.js";
-import { convert, mediaPath } from "./media.js";
+import { convert, openMedia } from "./media.js";
 import * as yemot from "./yemot.js";
 export function createWorker(adapters = {}) {
   const remote = { ...yemot, ...adapters };
@@ -91,11 +91,7 @@ export function createWorker(adapters = {}) {
       const form = new FormData();
       form.append("model", "gpt-4o-mini-transcribe");
       form.append("language", "he");
-      form.append(
-        "file",
-        new Blob([await readFile(mediaPath(m.media))], { type: "audio/wav" }),
-        "recording.wav",
-      );
+      form.append("file", await openMedia(m.media), "recording.wav");
       const res = await fetch(
         "https://api.openai.com/v1/audio/transcriptions",
         {
