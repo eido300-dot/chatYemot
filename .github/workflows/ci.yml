@@ -50,3 +50,11 @@ jobs:
           DB_USER: chatyemot
           DB_PASSWORD: local-ci-test
         run: node --test --test-concurrency=1 test/*.test.js
+      - name: Run focused browser tests when present
+        shell: bash
+        run: |
+          if compgen -G 'test/browser/*.test.js' >/dev/null; then
+            CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+            export CHROMIUM_PATH
+            node --test --test-concurrency=1 test/browser/*.test.js
+          fi
