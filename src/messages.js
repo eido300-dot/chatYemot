@@ -1,3 +1,4 @@
+import { validRemote } from "./yemot.js";
 import { transaction, rows } from "./db.js";
 import { fail } from "./security.js";
 export async function enqueue(c, type, id, version, payload = null) {
@@ -58,21 +59,28 @@ export async function editMessage(user, id, { version, body, transcript }) {
     ).trim();
     if (text.length > 5000 || (!text && m.kind === "text"))
       throw fail(400, "תוכן לא תקין");
+    const nextVersion = version + 1;
+    const reuseRecording =
+      m.kind === "audio" &&
+      m.synced_version === version &&
+      validRemote(m.yemot_path);
     await c.execute(
       "INSERT INTO message_versions(message_id,version,body,transcript,editor_id) VALUES(?,?,?,?,?)",
       [id, m.version, m.body, m.transcript, user.id],
     );
     await c.execute(
-      "UPDATE messages SET body=?,transcript=?,transcript_manual=?,version=version+1,updated_at=NOW(3) WHERE id=?",
+      "UPDATE messages SET body=?,transcript=?,transcript_manual=?,version=?,synced_version=?,updated_at=NOW(3) WHERE id=?",
       [
         m.kind === "text" ? text : m.body,
         m.kind === "audio" ? text : m.transcript,
         m.kind === "audio" ? 1 : m.transcript_manual,
+        nextVersion,
+        reuseRecording ? nextVersion : m.synced_version,
         id,
       ],
     );
-    await enqueue(c, "sync", id, version + 1);
-    return version + 1;
+    if (!reuseRecording) await enqueue(c, "sync", id, nextVersion);
+    return nextVersion;
   });
 }
 export async function listMessages({ before, search } = {}) {

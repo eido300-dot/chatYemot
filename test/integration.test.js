@@ -302,6 +302,66 @@ test("queued tzintuk waits for the current version and edits never notify again"
   while (await worker.tick()) {}
   assert.deepEqual(events, ["upload:1", "upload:2", "tzintuk", "upload:3"]);
 });
+test("editing a synced audio transcript reuses its recording", async () => {
+  const login = await request("/api/login", "POST", {
+    username: "bob",
+    password: "test-password-123",
+  }, false);
+  assert.equal(login.status, 200);
+  const headers = {
+    Origin: config.origin,
+    Cookie: login.headers.get("set-cookie").split(";")[0],
+    "X-CSRF-Token": (await login.json()).csrf,
+  };
+  const recordingRequest = (url, options = {}) =>
+    fetch(base + url, { ...options, headers: { ...headers, ...options.headers } });
+
+  const form = new FormData();
+  form.append("audio", new Blob([wav()], { type: "audio/wav" }), "test.wav");
+  const created = await recordingRequest("/api/audio", { method: "POST", body: form });
+  assert.equal(created.status, 201);
+  const { id: recordingId } = await created.json();
+  const uploads = [];
+  const worker = createWorker({
+    upload: async (message) => {
+      if (message.id === recordingId) uploads.push(message.version);
+      return `ivr2:/9/${message.id}v${message.version}.${message.kind === "audio" ? "wav" : "tts"}`;
+    },
+    push: async () => {},
+    tzintuk: async () => {},
+  });
+  while (!uploads.length && await worker.tick()) {}
+  assert.deepEqual(uploads, [1]);
+
+  const url = "/api/messages/" + recordingId;
+  const edited = await recordingRequest(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version: 1, transcript: "תמלול לאחר סנכרון" }),
+  });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(await edited.json(), { version: 2 });
+  const [message] = await (await recordingRequest("/api/messages")).json();
+  assert.equal(message.id, recordingId);
+  assert.equal(message.synced_version, 2);
+  assert.equal(message.transcript, "תמלול לאחר סנכרון");
+  const [previous] = await (await recordingRequest(url + "/versions")).json();
+  assert.equal(previous.version, 1);
+  assert.equal(previous.transcript, null);
+  const playback = await recordingRequest(url + "/audio");
+  assert.equal(playback.status, 200);
+  assert.equal(Buffer.from(await playback.arrayBuffer()).toString("ascii", 0, 4), "RIFF");
+
+  while (await worker.tick()) {}
+  assert.deepEqual(uploads, [1]);
+  assert.deepEqual(
+    await rows(
+      "SELECT version,state,attempts FROM jobs WHERE message_id=? AND type='tzintuk'",
+      [recordingId],
+    ),
+    [{ version: 1, state: "done", attempts: 1 }],
+  );
+});
 test("IVR invalid menu attempts are bounded", async () => {
   let attempts = 0;
   const call = {
