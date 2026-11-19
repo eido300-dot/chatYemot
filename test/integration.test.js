@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
@@ -393,7 +393,7 @@ test("phone recording is imported, converted and visible on web", async () => {
     parentId: id,
   });
   const worker = createWorker({
-    download: async () => wav(),
+    download: (_remote, destination) => writeFile(destination, wav()),
     upload: async () => "ivr2:/9/001.wav",
     push: async () => {},
     tzintuk: async () => {},
@@ -407,6 +407,30 @@ test("phone recording is imported, converted and visible on web", async () => {
     200,
   );
   assert.equal(m.parent_id, id);
+});
+test("a partial phone download is discarded and its import stays retryable", async () => {
+  const { createMessage } = await import("../src/messages.js");
+  const phoneId = await createMessage(alice, {
+    kind: "audio",
+    source: "phone",
+    remote: "/9/010.wav",
+  });
+  const worker = createWorker({
+    upload: async () => "ivr2:/9/001.wav",
+    download: async (_remote, destination) => {
+      await writeFile(destination, Buffer.from("partial recording"));
+      throw Error("download interrupted");
+    },
+  });
+  while (await worker.tick()) {}
+  const [message] = await rows("SELECT media FROM messages WHERE id=?", [phoneId]);
+  assert.equal(message.media, null);
+  const [job] = await rows(
+    "SELECT state,attempts FROM jobs WHERE type='import' AND message_id=?",
+    [phoneId],
+  );
+  assert.deepEqual([job.state, job.attempts], ["pending", 1]);
+  assert.deepEqual(await readdir(path.join(config.data, "tmp")), []);
 });
 test("rejects arbitrary push hosts and tracks reads", async () => {
   assert.equal(
