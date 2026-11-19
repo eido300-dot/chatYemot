@@ -1,10 +1,14 @@
 import { transaction, rows } from "./db.js";
 import { fail } from "./security.js";
-export async function enqueue(c, type, id, version, payload = null) {
+export async function enqueueMany(c, id, version, jobs) {
+  const placeholders = jobs.map(() => "(?,?,?,?)").join(",");
   await c.execute(
-    "INSERT IGNORE INTO jobs(type,message_id,version,payload) VALUES(?,?,?,?)",
-    [type, id, version, payload],
+    `INSERT IGNORE INTO jobs(type,message_id,version,payload) VALUES ${placeholders}`,
+    jobs.flatMap(({ type, payload = null }) => [type, id, version, payload]),
   );
+}
+export function enqueue(c, type, id, version, payload = null) {
+  return enqueueMany(c, id, version, [{ type, payload }]);
 }
 export async function createMessage(
   user,
@@ -34,11 +38,12 @@ export async function createMessage(
       [user.id, parentId || null, kind, body, media, source],
     );
     const id = r.insertId;
-    await enqueue(c, remote ? "import" : "sync", id, 1, remote);
+    const jobs = [{ type: remote ? "import" : "sync", payload: remote }];
     if (!remote) {
-      await enqueue(c, "push", id, 1);
-      if (kind === "audio") await enqueue(c, "transcribe", id, 1);
+      jobs.push({ type: "push" });
+      if (kind === "audio") jobs.push({ type: "transcribe" });
     }
+    await enqueueMany(c, id, 1, jobs);
     return id;
   });
 }
