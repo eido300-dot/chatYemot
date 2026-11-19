@@ -424,8 +424,21 @@ test("rejects arbitrary push hosts and tracks reads", async () => {
     ).status,
     400,
   );
-  assert.equal((await request("/api/read", "POST", { id })).status, 200);
+  const marked = await request("/api/read", "POST", { id });
+  assert.equal(marked.status, 200);
+  assert.deepEqual(await marked.json(), { ok: true, last_read: id });
   assert.equal((await (await request("/api/me")).json()).user.last_read, id);
+  const newest = await request("/api/messages", "POST", { body: "נקראה" });
+  assert.equal(newest.status, 201);
+  const { id: latest } = await newest.json();
+  const [high, low] = await Promise.all([
+    request("/api/read", "POST", { id: Number.MAX_SAFE_INTEGER }),
+    request("/api/read", "POST", { id: 0 }),
+  ]);
+  assert.deepEqual(await high.json(), { ok: true, last_read: latest });
+  assert.ok([id, latest].includes((await low.json()).last_read));
+  const after = await request("/api/read", "POST", { id: 0 });
+  assert.deepEqual(await after.json(), { ok: true, last_read: latest });
 });
 test("logout invalidates session", async () => {
   assert.equal((await request("/api/logout", "POST")).status, 200);
