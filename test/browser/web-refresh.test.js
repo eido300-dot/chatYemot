@@ -19,6 +19,7 @@ after(() => browser?.close());
 const files = new Map([
   ["/", ["index.html", "text/html"]],
   ["/app.js", ["app.js", "text/javascript"]],
+  ["/conversation-view.js", ["conversation-view.js", "text/javascript"]],
   ["/style.css", ["style.css", "text/css"]],
 ]);
 
