@@ -1,6 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { config } from "./config.js";
-import { mediaPath } from "./media.js";
+import { openMedia } from "./media.js";
 const base = "https://www.call2all.co.il/ym/api/";
 export async function api(command, params = {}) {
   const res = await fetch(base + command, {
@@ -28,11 +27,7 @@ export async function upload(m) {
     const form = new FormData();
     form.append("token", config.yemot.token);
     form.append("path", remote);
-    form.append(
-      "file",
-      new Blob([await readFile(mediaPath(m.media))], { type: "audio/wav" }),
-      "audio.wav",
-    );
+    form.append("file", await openMedia(m.media), "audio.wav");
     const res = await fetch(base + "UploadFile", {
       method: "POST",
       body: form,
