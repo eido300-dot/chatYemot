@@ -217,10 +217,7 @@ function createMessageRefresh(session) {
     const hasMore = page.length >= 50 ||
       (!older && sameSearch && oldest && data.some((m) => m.id < oldest));
     conversationView.render(messages, user, { older, hasMore });
-    const readLabel = messages.some((m) => m.id > user.last_read)
-      ? "סימון כנקרא ✓"
-      : "הכול נקרא ✓";
-    if ($("read").textContent !== readLabel) $("read").textContent = readLabel;
+    updateReadButton();
   }
 
   return function schedule({ older = false, poll = false } = {}) {
@@ -410,12 +407,22 @@ $("composer").onsubmit = async (e) => {
     }
   }
 };
+function updateReadButton() {
+  const button = $("read");
+  const label = (messages.at(-1)?.id ?? 0) > user.last_read
+    ? "סימון כנקרא ✓"
+    : "הכול נקרא ✓";
+  if (button.textContent !== label) button.textContent = label;
+}
 $("read").onclick = async () => {
+  if (!user) return;
+  const session = sessionId;
   try {
-    const id = Math.max(0, ...messages.map((m) => m.id));
-    await api("/read", { method: "POST", body: { id } });
-    user.last_read = id;
-    await refresh();
+    const id = messages.at(-1)?.id ?? 0;
+    const { last_read } = await api("/read", { method: "POST", body: { id } });
+    checkSession(session);
+    user.last_read = Math.max(user.last_read, last_read);
+    updateReadButton();
   } catch (e) {
     reportError(e);
   }

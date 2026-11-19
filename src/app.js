@@ -256,7 +256,9 @@ export async function createApp() {
         "UPDATE users SET last_read=GREATEST(last_read,LEAST(?,(SELECT COALESCE(MAX(id),0) FROM messages))) WHERE id=?",
         [id, req.user.id],
       );
-      res.json({ ok: true });
+      const [user] = await rows("SELECT last_read FROM users WHERE id=?", [req.user.id]);
+      if (!user) throw fail(401, "נדרשת כניסה");
+      res.json({ ok: true, last_read: user.last_read });
     }),
   );
   app.post(
