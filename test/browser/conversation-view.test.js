@@ -14,7 +14,7 @@ test("refreshes leave unchanged history alone and patch audio and reply previews
 }, async (t) => {
   assert.ok(browserPath, "Set CHROMIUM_PATH to the installed Chromium or Chrome binary");
   const app = express();
-  app.use(express.static(fileURLToPath(new URL("../public", import.meta.url))));
+  app.use(express.static(fileURLToPath(new URL("../../public", import.meta.url))));
   const server = app.listen(0, "127.0.0.1");
   t.after(() => new Promise((resolve) => server.close(resolve)));
   await once(server, "listening");
