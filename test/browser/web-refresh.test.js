@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright-core";
 
 let browser;
 before(async () => {
+  const executablePath = process.env.CHROMIUM_PATH ||
+    ["/usr/bin/chromium", "/usr/bin/google-chrome"].find(existsSync);
+  assert.ok(executablePath, "Set CHROMIUM_PATH to the installed Chromium or Chrome binary");
   browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
+    executablePath,
     args: ["--no-sandbox"],
   });
 });
