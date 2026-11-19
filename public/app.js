@@ -1,4 +1,15 @@
+import { createConversationView } from "./conversation-view.js";
+
 const $ = (id) => document.getElementById(id);
+const conversationView = createConversationView({
+  list: $("messages"),
+  scroller: $("conversation"),
+  empty: $("empty"),
+  olderButton: $("older"),
+  onReply: setReply,
+  onEdit: openEdit,
+  onMissingParent: () => toast("הודעת המקור קודמת לרשימה. טענו הודעות קודמות."),
+});
 let csrf,
   user,
   messages = [],
@@ -80,11 +91,6 @@ function showLogin() {
     if (active.state !== "inactive") active.stop();
     active.stream.getTracks().forEach((track) => track.stop());
   }
-  for (const audio of $("messages").querySelectorAll("audio")) {
-    audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
-  }
   $("composer").reset();
   $("loginForm").reset();
   $("loginForm").querySelector("button[type=submit]").disabled = false;
@@ -112,7 +118,7 @@ function showLogin() {
   user = null;
   messages = [];
   currentSearch = null;
-  $("messages").replaceChildren();
+  conversationView.clear();
   csrf = null;
 }
 async function enter(data) {
@@ -170,76 +176,6 @@ function clearReply() {
   $("reply").hidden = true;
 }
 $("cancelReply").onclick = clearReply;
-function renderMessage(m) {
-  const card = el("article", "message" + (m.user_id === user.id ? " own" : ""));
-  card.id = "message-" + m.id;
-  card.dataset.version = m.version;
-  card.dataset.transcript = m.transcript || "";
-  const meta = el("div", "meta");
-  meta.append(
-    el("span", "author", m.name),
-    el(
-      "time",
-      "",
-      new Date(m.created_at).toLocaleString("he-IL", {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    ),
-  );
-  card.append(meta);
-  if (m.parent_id) {
-    const quote = el(
-      "button",
-      "quote",
-      "↪ " +
-        (m.parent_name || "") +
-        ": " +
-        (m.parent_body || "הקלטה").slice(0, 140),
-    );
-    quote.onclick = () => {
-      const target = $("message-" + m.parent_id);
-      target
-        ? target.scrollIntoView({ block: "center", behavior: "smooth" })
-        : toast("הודעת המקור קודמת לרשימה. טענו הודעות קודמות.");
-    };
-    card.append(quote);
-  }
-  if (m.kind === "text") card.append(el("div", "content", m.body));
-  else {
-    const audio = el("audio");
-    audio.controls = true;
-    audio.preload = "none";
-    audio.src = "/api/messages/" + m.id + "/audio";
-    card.append(audio);
-    const details = el("details");
-    details.append(
-      el("summary", "", m.transcript ? "תמלול ההקלטה" : "טרם נוסף תמלול"),
-      el("p", "content", m.transcript || "ניתן להוסיף תמלול באמצעות עריכה."),
-    );
-    card.append(details);
-  }
-  card.append(
-    el(
-      "span",
-      "sync",
-      m.synced_version === m.version ? "✓ זמין גם בקו" : "◷ ממתין לסנכרון לקו",
-    ),
-  );
-  const actions = el("div", "actions"),
-    answer = el("button", "", "תגובה");
-  answer.onclick = () => setReply(m);
-  actions.append(answer);
-  if (m.user_id === user.id || user.admin) {
-    const edit = el("button", "", m.kind === "audio" ? "עריכת תמלול" : "עריכה");
-    edit.onclick = () => openEdit(m);
-    actions.append(edit);
-  }
-  card.append(actions);
-  return card;
-}
 function refresh(options) {
   return scheduleMessageRefresh?.(options) ?? Promise.resolve();
 }
@@ -250,19 +186,8 @@ function createMessageRefresh(session) {
   const queued = new Map();
 
   async function loadMessages(query, older) {
-    const firstLoad = messages.length === 0;
-    const nearBottom =
-      $("conversation").scrollHeight -
-        $("conversation").scrollTop -
-        $("conversation").clientHeight <
-      150;
     const sameSearch = currentSearch === query;
     const oldest = messages.length ? Math.min(...messages.map((m) => m.id)) : null;
-    const scroller = $("conversation");
-    const anchor = [...$("messages").children].find(
-      (node) => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top,
-    );
-    const anchorTop = anchor?.getBoundingClientRect().top;
     const params = new URLSearchParams();
     if (query) params.set("search", query);
     if (older) params.set("before", oldest);
@@ -289,59 +214,13 @@ function createMessageRefresh(session) {
     for (const m of data)
       if (older || !sameSearch || !oldest || m.id >= oldest) map.set(m.id, m);
     messages = [...map.values()].sort((a, b) => a.id - b.id);
-    const old = new Map([...$("messages").children].map((n) => [n.id, n]));
-    let position = 0;
-    for (const m of messages) {
-      const key = "message-" + m.id;
-      let node = old.get(key);
-      if (
-        !node ||
-        Number(node.dataset.version) !== m.version ||
-        node.dataset.transcript !== (m.transcript || "") ||
-        node.dataset.synced !== String(m.synced_version)
-      ) {
-        const previous = node;
-        node = renderMessage(m);
-        node.dataset.synced = m.synced_version;
-        if (
-          previous?.querySelector("details")?.open &&
-          node.querySelector("details")
-        )
-          node.querySelector("details").open = true;
-        if (previous && m.kind === "audio") {
-          // Keep the actual audio element mounted while sync/transcription updates.
-          previous.querySelector("summary").textContent = node.querySelector("summary").textContent;
-          previous.querySelector("details .content").textContent = node.querySelector("details .content").textContent;
-          previous.querySelector(".sync").textContent = node.querySelector(".sync").textContent;
-          previous.querySelector(".actions").replaceWith(node.querySelector(".actions"));
-          Object.assign(previous.dataset, node.dataset);
-          node = previous;
-        } else {
-          previous ? previous.replaceWith(node) : $("messages").append(node);
-        }
-      }
-      if ($("messages").children[position] !== node)
-        $("messages").insertBefore(
-          node,
-          $("messages").children[position] || null,
-        );
-      position++;
-      old.delete(key);
-    }
-    for (const node of old.values()) node.remove();
-    $("empty").hidden = messages.length > 0;
-    if (older || !sameSearch || !oldest)
-      $("older").hidden = page.length < 50;
-    else
-      $("older").hidden = page.length < 50 && !data.some((m) => m.id < oldest);
-    $("read").textContent = messages.some((m) => m.id > user.last_read)
+    const hasMore = page.length >= 50 ||
+      (!older && sameSearch && oldest && data.some((m) => m.id < oldest));
+    conversationView.render(messages, user, { older, hasMore });
+    const readLabel = messages.some((m) => m.id > user.last_read)
       ? "סימון כנקרא ✓"
       : "הכול נקרא ✓";
-    if (!older && (nearBottom || firstLoad)) {
-      $("conversation").scrollTop = $("conversation").scrollHeight;
-    } else if (anchor && $(anchor.id)) {
-      scroller.scrollTop += $(anchor.id).getBoundingClientRect().top - anchorTop;
-    }
+    if ($("read").textContent !== readLabel) $("read").textContent = readLabel;
   }
 
   return function schedule({ older = false, poll = false } = {}) {
