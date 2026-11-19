@@ -54,17 +54,17 @@ object Api {
         return (c.responseCode == expect).also { c.disconnect() }
     }
 
-    /** רושם את טוקן FCM אצל השרת. נקרא אחרי כניסה ובכל חידוש טוקן. */
-    fun registerFcmToken(ctx: Context, token: String) {
-        runCatching {
-            if (!init()) return
-            if (post("/api/fcm", JSONObject().put("token", token).toString())) {
-                val prefs = ctx.getSharedPreferences("svc", Context.MODE_PRIVATE)
-                if (prefs.getLong("last", -1) < 0) {
-                    val a = messages()
-                    prefs.edit().putLong("last", if (a.length() > 0) a.getJSONObject(0).getLong("id") else 0).apply()
-                }
+    /** רושם את טוקן FCM אצל השרת. מחזיר null בהצלחה, אחרת תיאור התקלה. */
+    fun registerFcmToken(ctx: Context, token: String): String? {
+        return try {
+            if (!init()) return "לא מחובר (init)"
+            if (!post("/api/fcm", JSONObject().put("token", token).toString())) return "השרת דחה את /api/fcm"
+            val prefs = ctx.getSharedPreferences("svc", Context.MODE_PRIVATE)
+            if (prefs.getLong("last", -1) < 0) {
+                val a = messages()
+                prefs.edit().putLong("last", if (a.length() > 0) a.getJSONObject(0).getLong("id") else 0).apply()
             }
-        }
+            null
+        } catch (e: Exception) { e.toString() }
     }
 }

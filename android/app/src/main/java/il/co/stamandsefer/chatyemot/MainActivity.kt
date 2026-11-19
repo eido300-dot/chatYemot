@@ -133,10 +133,17 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private fun registerForPush() {
+        fun say(m: String) = runOnUiThread { android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_LONG).show() }
         runCatching {
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
-                .addOnSuccessListener { t -> Thread { Api.registerFcmToken(applicationContext, t) }.start() }
-        } // ללא google-services.json (בנייה בלי FCM) Firebase לא מאותחל - מתעלמים
+                .addOnSuccessListener { t ->
+                    Thread {
+                        val err = Api.registerFcmToken(applicationContext, t)
+                        if (err != null) say("רישום התראות נכשל: $err")
+                    }.start()
+                }
+                .addOnFailureListener { e -> say("טוקן התראות לא התקבל: ${e.message}") }
+        }.onFailure { say("Firebase לא מאותחל: ${it.message}") }
     }
 
     private fun askNotificationPermission() {
