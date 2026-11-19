@@ -71,6 +71,13 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
+            // האתר הוא SPA: הכניסה אינה טוענת דף חדש, לכן מזהים בקשת login ורושמים אחריה
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                if (request.method == "POST" && request.url.path?.endsWith("/api/login") == true)
+                    webView.postDelayed({ if (Api.loggedIn()) registerForPush() }, 3000)
+                return null
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
                 // אחרי כניסה לאתר קיימת עוגיית session: מפעילים את שירות ההתראות
                 if (Api.loggedIn()) registerForPush()
@@ -171,6 +178,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         Notifier.appVisible = true
         webView.onResume()
+        if (Api.loggedIn()) registerForPush()
     }
 
     override fun onPause() {
