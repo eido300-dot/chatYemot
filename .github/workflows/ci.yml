@@ -38,10 +38,27 @@ jobs:
           node-version: 22
       - run: npm ci --no-audit --no-fund
       - name: Ensure FFmpeg is available
+        shell: bash
+        timeout-minutes: 3
         run: |
           if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends ffmpeg
+            . /etc/os-release
+            sources="$RUNNER_TEMP/chatyemot-ubuntu.sources"
+            printf '%s\n' \
+              'Types: deb' \
+              'URIs: https://archive.ubuntu.com/ubuntu/' \
+              "Suites: $VERSION_CODENAME $VERSION_CODENAME-updates $VERSION_CODENAME-security" \
+              'Components: main universe' \
+              'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' > "$sources"
+            apt_options=(
+              -o "Dir::Etc::sourcelist=$sources"
+              -o Dir::Etc::sourceparts=-
+              -o Acquire::Retries=1
+              -o Acquire::https::Timeout=15
+              -o Acquire::Languages=none
+            )
+            sudo apt-get "${apt_options[@]}" update --error-on=any
+            sudo apt-get "${apt_options[@]}" install -y --no-install-recommends ffmpeg
           fi
       - name: Run Node tests
         env:
