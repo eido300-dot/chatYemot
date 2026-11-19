@@ -10,6 +10,26 @@ import { verify, normalizePhone, allowedAttempt } from "./security.js";
 import { createMessage } from "./messages.js";
 import { validRemote } from "./yemot.js";
 const text = (data) => [{ type: "text", data, removeInvalidChars: true }];
+async function readConfirmedTap(call, prompt, filters, confirmationLabel) {
+  const tap = (message, options) =>
+    call.read(text(message), "tap", {
+      ...options,
+      min_digits: 1,
+      typing_playback_mode: "No",
+    });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const value = await tap(prompt, filters);
+    const label = confirmationLabel(value);
+    if (label === null) continue;
+    const confirmed = await tap(
+      label + " לְאִישּׁוּר הַקֵּשׁ 1 לְהַקָּשָׁה מְחוּדֶּשֶׁת 2",
+      { max_digits: 1, digits_allowed: ["1", "2"] },
+    );
+    if (confirmed === "1") return value;
+  }
+  call.id_list_message(text("יוֹתֵר מִדַּי נִסְיוֹנוֹת לְהִתְרָאוֹת"));
+  return null;
+}
 export async function readWithConfirmationwithPrompt(
   call,
   pre,
@@ -18,66 +38,21 @@ export async function readWithConfirmationwithPrompt(
   validate = () => true,
   secret = false,
 ) {
-  for (let i = 0; i < 3; i++) {
-    const value = await call.read(text(pre + " " + prompt), "tap", {
-      ...filters,
-      min_digits: 1,
-      typing_playback_mode: "No",
-    });
-    if (!validate(value)) continue;
-    const ok = await call.read(
-      text(
-        (secret ? "הַקּוֹד נִקְלַט" : value) +
-          " לְאִישּׁוּר הַקֵּשׁ 1 לְהַקָּשָׁה מְחוּדֶּשֶׁת 2",
-      ),
-      "tap",
-      {
-        max_digits: 1,
-        min_digits: 1,
-        typing_playback_mode: "No",
-        digits_allowed: ["1", "2"],
-      },
-    );
-    if (ok === "1") return value;
-  }
-  call.id_list_message(text("יוֹתֵר מִדַּי נִסְיוֹנוֹת לְהִתְרָאוֹת"));
-  return null;
+  return readConfirmedTap(call, pre + " " + prompt, filters, (value) => {
+    if (!validate(value)) return null;
+    return secret ? "הַקּוֹד נִקְלַט" : String(value);
+  });
 }
 export async function readWithConfirmationwithArray(call, pre, options) {
   const digits = options.map((_, i) => String(i + 1));
-  for (let i = 0; i < 3; i++) {
-    const v = await call.read(
-      text(
-        pre +
-          " " +
-          options.map((label, j) => `לְ ${label} הַקֵּשׁ ${j + 1}`).join(" "),
-      ),
-      "tap",
-      {
-        max_digits: String(options.length).length,
-        min_digits: 1,
-        typing_playback_mode: "No",
-        digits_allowed: digits,
-      },
-    );
-    if (!digits.includes(v)) continue;
-    const ok = await call.read(
-      text(
-        options[Number(v) - 1] +
-          " לְאִישּׁוּר הַקֵּשׁ 1 לְהַקָּשָׁה מְחוּדֶּשֶׁת 2",
-      ),
-      "tap",
-      {
-        max_digits: 1,
-        min_digits: 1,
-        typing_playback_mode: "No",
-        digits_allowed: ["1", "2"],
-      },
-    );
-    if (ok === "1") return v;
-  }
-  call.id_list_message(text("יוֹתֵר מִדַּי נִסְיוֹנוֹת לְהִתְרָאוֹת"));
-  return null;
+  const prompt = pre + " " +
+    options.map((label, i) => `לְ ${label} הַקֵּשׁ ${i + 1}`).join(" ");
+  return readConfirmedTap(
+    call,
+    prompt,
+    { max_digits: String(options.length).length, digits_allowed: digits },
+    (value) => digits.includes(value) ? String(options[Number(value) - 1]) : null,
+  );
 }
 async function authenticate(call) {
   const phone = normalizePhone(call.phone);
