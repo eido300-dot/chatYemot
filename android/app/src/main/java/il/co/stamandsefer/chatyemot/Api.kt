@@ -34,7 +34,12 @@ object Api {
         c.connectTimeout = 15000
         c.readTimeout = 20000
         c.setRequestProperty("Cookie", cookie() ?: "")
-        if (method != "GET") c.setRequestProperty("x-csrf-token", csrf)
+        if (method != "GET") {
+            c.setRequestProperty("x-csrf-token", csrf)
+            // השרת דורש Origin זהה למקור האתר בבקשות שאינן GET
+            val u = java.net.URI(base)
+            c.setRequestProperty("Origin", "${u.scheme}://${u.host}")
+        }
         if (body != null) {
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
