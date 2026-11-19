@@ -7,20 +7,12 @@ import path from "node:path";
 import { unlink } from "node:fs/promises";
 import { config } from "./config.js";
 import { rows } from "./db.js";
-import {
-  hash,
-  random,
-  verify,
-  allowedAttempt,
-  fail,
-  validSubscription,
-  validPassword,
-} from "./security.js";
+import { fail, hash, validSubscription } from "./security.js";
 import { listMessages, createMessage, editMessage } from "./messages.js";
 import { prepareMedia, convert, mediaPath } from "./media.js";
 import { createIvr } from "./ivr.js";
-const wrap = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
+import { createSessionRouter } from "./sessions.js";
+import { wrap } from "./http.js";
 export async function createApp() {
   await prepareMedia();
   const app = express();
@@ -85,86 +77,7 @@ export async function createApp() {
   app.get("/api/config", (req, res) =>
     res.json({ pushKey: config.push.publicKey || null }),
   );
-  app.post(
-    "/api/login",
-    rateLimit({ windowMs: 15 * 60000, limit: 30 }),
-    wrap(async (req, res) => {
-      const { username, password } = req.body;
-      if (
-        typeof username !== "string" ||
-        !validPassword(password)
-      )
-        throw fail(400, "פרטים לא תקינים");
-      if (!(await allowedAttempt("web:" + username.toLowerCase())))
-        throw fail(429, "יש להמתין לפני ניסיון נוסף");
-      const u = (
-        await rows("SELECT * FROM users WHERE username=? AND active=1", [
-          username,
-        ])
-      )[0];
-      if (!u || !(await verify(password, u.password_hash)))
-        throw fail(401, "שם משתמש או סיסמה שגויים");
-      const token = random(),
-        csrf = random();
-      await rows(
-        "INSERT INTO sessions(token,user_id,csrf,expires_at) VALUES(?,?,?,DATE_ADD(NOW(), INTERVAL 7 DAY))",
-        [hash(token), u.id, csrf],
-      );
-      res.cookie("session", token, {
-        httpOnly: true,
-        secure: config.production,
-        sameSite: "strict",
-        maxAge: 7 * 86400000,
-        path: "/",
-      });
-      res.json({
-        csrf,
-        user: {
-          id: u.id,
-          name: u.name,
-          admin: !!u.admin,
-          last_read: u.last_read,
-        },
-      });
-    }),
-  );
-  app.use(
-    "/api",
-    wrap(async (req, res, next) => {
-      const token = req.cookies.session;
-      if (!token) throw fail(401, "נדרשת כניסה");
-      const s = (
-        await rows(
-          "SELECT s.*,u.name,u.admin,u.active,u.last_read FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>NOW() AND u.active=1",
-          [hash(token)],
-        )
-      )[0];
-      if (!s) throw fail(401, "נדרשת כניסה");
-      req.user = {
-        id: s.user_id,
-        name: s.name,
-        admin: !!s.admin,
-        last_read: s.last_read,
-      };
-      req.session = s;
-      if (
-        !["GET", "HEAD"].includes(req.method) &&
-        req.get("x-csrf-token") !== s.csrf
-      )
-        throw fail(403, "אימות הבקשה נכשל");
-      next();
-    }),
-  );
-  app.get("/api/me", (req, res) =>
-    res.json({ user: req.user, csrf: req.session.csrf }),
-  );
-  app.post(
-    "/api/logout",
-    wrap(async (req, res) => {
-      await rows("DELETE FROM sessions WHERE token=?", [req.session.token]);
-      res.clearCookie("session", { path: "/" }).json({ ok: true });
-    }),
-  );
+  app.use("/api", createSessionRouter());
   app.get(
     "/api/messages",
     wrap(async (req, res) => res.json(await listMessages(req.query))),
