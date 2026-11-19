@@ -322,14 +322,13 @@ test("editing a synced audio transcript reuses its recording", async () => {
   assert.equal(created.status, 201);
   const { id: recordingId } = await created.json();
   const uploads = [];
-  let notifications = 0;
   const worker = createWorker({
     upload: async (message) => {
       if (message.id === recordingId) uploads.push(message.version);
       return `ivr2:/9/${message.id}v${message.version}.${message.kind === "audio" ? "wav" : "tts"}`;
     },
     push: async () => {},
-    tzintuk: async () => notifications++,
+    tzintuk: async () => {},
   });
   while (!uploads.length && await worker.tick()) {}
   assert.deepEqual(uploads, [1]);
@@ -355,7 +354,13 @@ test("editing a synced audio transcript reuses its recording", async () => {
 
   while (await worker.tick()) {}
   assert.deepEqual(uploads, [1]);
-  assert.equal(notifications, 1);
+  assert.deepEqual(
+    await rows(
+      "SELECT version,state,attempts FROM jobs WHERE message_id=? AND type='tzintuk'",
+      [recordingId],
+    ),
+    [{ version: 1, state: "done", attempts: 1 }],
+  );
 });
 test("IVR invalid menu attempts are bounded", async () => {
   let attempts = 0;
