@@ -24,7 +24,7 @@ class ActionService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("action", "פעולות", NotificationManager.IMPORTANCE_MIN))
         startForeground(2, NotificationCompat.Builder(this, "action")
-            .setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle("צ'אטייב").build())
+            .setSmallIcon(R.drawable.ic_stat).setContentTitle("צ'אטייב").build())
         val id = intent?.getLongExtra(Notifier.EXTRA_ID, 0) ?: 0
         thread(isDaemon = true) {
             try {
@@ -67,7 +67,13 @@ class ActionService : Service() {
     private fun reply(id: Long, text: String) {
         val nm = getSystemService(NotificationManager::class.java)
         val ok = Api.post("/api/messages", JSONObject().put("body", text).put("parentId", id.toString()).toString(), 201)
-        if (ok) { nm.cancel(Notifier.notifId(id)); markRead(id) }
+        if (ok) {
+            // כמו בווטסאפ: מעדכנים את ההתראה (עוצר את סימן השליחה) והיא נעלמת מעצמה אחרי רגע
+            nm.notify(Notifier.notifId(id), NotificationCompat.Builder(this, Notifier.CH_MSG)
+                .setSmallIcon(R.drawable.ic_stat).setContentTitle("נשלח").setContentText(text)
+                .setOnlyAlertOnce(true).setSilent(true).setTimeoutAfter(1500).build())
+            markRead(id)
+        }
         else nm.notify(Notifier.notifId(id), NotificationCompat.Builder(this, Notifier.CH_MSG)
             .setSmallIcon(android.R.drawable.stat_notify_error).setContentTitle("השליחה נכשלה")
             .setContentText("התגובה לא נשלחה: $text").setAutoCancel(true).build())

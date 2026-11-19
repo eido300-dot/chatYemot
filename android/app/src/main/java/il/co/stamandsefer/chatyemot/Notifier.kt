@@ -53,7 +53,7 @@ object Notifier {
         )
         ctx.getSystemService(NotificationManager::class.java).notify(
             1, NotificationCompat.Builder(ctx, CH_MSG)
-                .setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle("צ'אטייב")
                 .setContentText("הודעה חדשה. פתחו את האפליקציה.")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -77,7 +77,9 @@ object Notifier {
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val b = NotificationCompat.Builder(ctx, CH_MSG)
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setColor(0xFF00765F.toInt())
+            .setLargeIcon(android.graphics.BitmapFactory.decodeResource(ctx.resources, R.mipmap.ic_launcher))
             .setContentTitle(m.optString("name"))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))

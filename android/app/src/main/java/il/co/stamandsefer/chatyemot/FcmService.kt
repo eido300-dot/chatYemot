@@ -6,7 +6,9 @@ import com.google.firebase.messaging.RemoteMessage
 /** גוגל מעירה את האפליקציה רק כשיש הודעה; אין חיבור פתוח וצריכת הסוללה זניחה. */
 class FcmService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
-        Api.registerFcmToken(this, token)
+        val p = getSharedPreferences("svc", MODE_PRIVATE)
+        p.edit().putBoolean("reg", false).apply()
+        if (Api.registerFcmToken(this, token) == null) p.edit().putBoolean("reg", true).apply()
     }
 
     override fun onMessageReceived(message: RemoteMessage) {

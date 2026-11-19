@@ -73,8 +73,13 @@ class MainActivity : AppCompatActivity() {
 
             // האתר הוא SPA: הכניסה אינה טוענת דף חדש, לכן מזהים בקשת login ורושמים אחריה
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
-                if (request.method == "POST" && request.url.path?.endsWith("/api/login") == true)
-                    webView.postDelayed({ if (Api.loggedIn()) registerForPush() }, 3000)
+                if (request.method == "POST") {
+                    val p = request.url.path ?: ""
+                    if (p.endsWith("/api/login"))
+                        webView.postDelayed({ if (Api.loggedIn()) registerForPush(force = true) }, 3000)
+                    else if (p.endsWith("/api/logout"))
+                        getSharedPreferences("svc", MODE_PRIVATE).edit().putBoolean("reg", false).apply()
+                }
                 return null
             }
 
@@ -136,18 +141,19 @@ class MainActivity : AppCompatActivity() {
         askNotificationPermission()
     }
 
-    private val notifPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val startPermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
-    private fun registerForPush() {
+    private fun registerForPush(force: Boolean = false) {
         fun say(m: String) = runOnUiThread { android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_LONG).show() }
-        say("בודק רישום התראות...")
+        if (!force && getSharedPreferences("svc", MODE_PRIVATE).getBoolean("reg", false)) return
         runCatching {
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnSuccessListener { t ->
                     Thread {
                         val err = Api.registerFcmToken(applicationContext, t)
-                        say(if (err != null) "רישום התראות נכשל: $err" else "התראות נרשמו בהצלחה")
+                        if (err != null) say("רישום התראות נכשל: $err")
+                        else getSharedPreferences("svc", MODE_PRIVATE).edit().putBoolean("reg", true).apply()
                     }.start()
                 }
                 .addOnFailureListener { e -> say("טוקן התראות לא התקבל: ${e.message}") }
@@ -155,11 +161,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val need = buildList {
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            add(Manifest.permission.RECORD_AUDIO)
+        }.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (need.isNotEmpty()) startPermissions.launch(need.toTypedArray())
     }
-
 
     private fun showOffline(view: WebView) {
         val html = """
@@ -179,7 +186,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         Notifier.appVisible = true
         webView.onResume()
-        if (Api.loggedIn()) registerForPush() else android.widget.Toast.makeText(this, "לא זוהתה עוגיית כניסה. עוגיות: ${Api.cookieNames()}", android.widget.Toast.LENGTH_SHORT).show()
+        if (Api.loggedIn()) registerForPush()
     }
 
     override fun onPause() {
