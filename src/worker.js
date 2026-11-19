@@ -9,9 +9,7 @@ import { convert, mediaPath } from "./media.js";
 import * as yemot from "./yemot.js";
 export function createWorker(adapters = {}) {
   const remote = { ...yemot, ...adapters };
-  let timer,
-    stopping = false,
-    current;
+  let scheduler;
   const pushReady = !!(config.push.publicKey && config.push.privateKey);
   if (pushReady)
     webpush.setVapidDetails(
@@ -161,31 +159,42 @@ export function createWorker(adapters = {}) {
     }
     return true;
   }
-  async function loop() {
-    if (stopping) return;
-    current = tick();
-    try {
-      await current;
-    } catch {
+  async function loop(state) {
+    if (state.stopping) return;
+    state.current = tick().catch(() => {
       console.error("Worker database operation failed");
-    } finally {
-      current = null;
-      if (!stopping) timer = setTimeout(loop, 1000);
-    }
+      return false;
+    });
+    const worked = await state.current;
+    state.current = null;
+    // Yield between ready jobs. Use the polling interval when the queue is idle.
+    if (!state.stopping)
+      state.timer = setTimeout(loop, worked ? 0 : 1000, state);
   }
   return {
     tick,
-    async start() {
-      await rows(
+    start() {
+      if (scheduler) return scheduler.startup;
+      const state = { stopping: false };
+      scheduler = state;
+      state.startup = rows(
         "UPDATE jobs SET state=IF(type IN ('push','tzintuk'),'uncertain','pending') WHERE state='running'",
-      );
-      stopping = false;
-      await loop();
+      )
+        .then(() => loop(state))
+        .catch((error) => {
+          if (scheduler === state) scheduler = null;
+          throw error;
+        });
+      return state.startup;
     },
     async stop() {
-      stopping = true;
-      clearTimeout(timer);
-      await current;
+      const state = scheduler;
+      if (!state) return;
+      state.stopping = true;
+      clearTimeout(state.timer);
+      await state.startup.catch(() => {});
+      await state.current;
+      if (scheduler === state) scheduler = null;
     },
   };
 }

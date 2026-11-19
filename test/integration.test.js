@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
+import { setTimeout as wait } from "node:timers/promises";
 import path from "node:path";
 if (!process.env.TEST_DB_NAME?.endsWith("_test"))
   throw Error(
@@ -430,4 +431,48 @@ test("rejects arbitrary push hosts and tracks reads", async () => {
 test("logout invalidates session", async () => {
   assert.equal((await request("/api/logout", "POST")).status, 200);
   assert.equal((await request("/api/me")).status, 401);
+});
+test("worker scheduler drains ready jobs and waits for the active job on stop", async () => {
+  const { createMessage } = await import("../src/messages.js");
+  const seen = [];
+  const thirdStarted = Promise.withResolvers();
+  const finishThird = Promise.withResolvers();
+  const queued = [];
+  const worker = createWorker({
+    download: async () => wav(),
+    upload: async (message) => {
+      if (queued.includes(message.id)) seen.push(message.id);
+      if (message.id === queued[2]) {
+        thirdStarted.resolve();
+        await finishThird.promise;
+      }
+      return `ivr2:/9/${message.id}.tts`;
+    },
+  });
+  while (await worker.tick()) {}
+  for (let job = 0; job < 4; job++)
+    queued.push(await createMessage(alice, { body: "הודעה בתור " + job }));
+
+  const deadline = new AbortController();
+  try {
+    await worker.start();
+    await Promise.race([
+      thirdStarted.promise,
+      wait(1500, null, { signal: deadline.signal }).then(() => {
+        assert.fail("Third ready job stayed behind the idle poll delay");
+      }),
+    ]);
+    const stopped = worker.stop();
+    const settled = await Promise.race([stopped.then(() => true), wait(20, false)]);
+    assert.equal(settled, false);
+    finishThird.resolve();
+    await stopped;
+    assert.deepEqual(seen, queued.slice(0, 3));
+    assert.equal(await worker.tick(), true);
+    assert.deepEqual(seen, queued);
+  } finally {
+    deadline.abort();
+    finishThird.resolve();
+    await worker.stop();
+  }
 });
