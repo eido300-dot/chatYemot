@@ -78,6 +78,79 @@ after(async () => {
   await db.end();
   await rm(process.env.DATA_DIR, { recursive: true, force: true });
 });
+test("IVR playback pages through all messages and remembers which ones are new", async () => {
+  const ids = [];
+  const fields = {
+    ApiCallId: "playback-call",
+    ApiDID: config.yemot.did,
+    ApiPhone: bob.phone,
+    ApiExtension: "1",
+  };
+  let nextInput = 1;
+  let ended = false;
+
+  async function step(values = {}) {
+    const response = await fetch(base + "/ivr/" + config.yemot.secret, {
+      method: "POST",
+      body: new URLSearchParams({ ...fields, ...values }),
+    });
+    assert.equal(response.status, 200);
+    return response.text();
+  }
+
+  async function choose(value) {
+    const confirmation = await step({ ["val_" + nextInput++]: value });
+    assert.match(confirmation, /לְאִישּׁוּר/);
+    return step({ ["val_" + nextInput++]: "1" });
+  }
+
+  try {
+    for (let file = 100; file <= 121; file++) {
+      const inserted = await rows(
+        `INSERT INTO messages(user_id,parent_id,kind,body,yemot_path,synced_version)
+         VALUES(?,?,'text','הודעת בדיקה',?,?)`,
+        [
+          alice.id,
+          file === 121 ? ids[1] : null,
+          `ivr2:/9/${file}.tts`,
+          file === 100 ? 0 : 1,
+        ],
+      );
+      ids.push(inserted.insertId);
+    }
+    await rows("INSERT INTO phone_reads(user_id,message_id) VALUES(?,?)", [
+      bob.id,
+      ids[1],
+    ]);
+
+    assert.match(await step(), /נָא לְהַקִּישׁ קוֹד אִישִׁי/);
+    assert.match(await choose("123456"), /תַּפְרִיט רָאשִׁי/);
+
+    assert.match(await choose("1"), /f-\/9\/102\b/);
+    assert.match(await choose("3"), /תַּפְרִיט רָאשִׁי/);
+    assert.match(await choose("1"), /f-\/9\/103\b/);
+    assert.match(await choose("3"), /תַּפְרִיט רָאשִׁי/);
+
+    let response = await choose("2");
+    for (let file = 101; file <= 121; file++) {
+      assert.match(response, new RegExp(`f-/9/${file}\\b`));
+      if (file === 121) assert.match(response, /תְּגוּבָה לְהוֹדָעָה/);
+      response = await choose("1");
+    }
+    assert.match(response, /אֵין הוֹדָעוֹת נוֹסָפוֹת/);
+    assert.match(await choose("4"), /hangup/);
+    ended = true;
+  } finally {
+    if (!ended) await step({ hangup: "yes" });
+    for (const id of ids.reverse()) {
+      await rows("DELETE FROM phone_reads WHERE user_id=? AND message_id=?", [
+        bob.id,
+        id,
+      ]);
+      await rows("DELETE FROM messages WHERE id=?", [id]);
+    }
+  }
+});
 test("authentication, origin and CSRF", async () => {
   assert.equal(
     (await request("/api/messages", "GET", null, false)).status,

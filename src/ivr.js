@@ -124,13 +124,19 @@ async function recordMessage(call, user, parentId = null) {
   call.id_list_message(text("הַהַקְלָטָה לֹא נִקְלְטָה"));
 }
 async function playMessages(call, user, onlyNew) {
+  const unreadFilter = onlyNew
+    ? `AND NOT EXISTS (
+         SELECT 1 FROM phone_reads r WHERE r.user_id=? AND r.message_id=m.id
+       )`
+    : "";
+  const query = `SELECT m.id, m.parent_id, m.yemot_path
+    FROM messages m
+    WHERE m.id>? AND m.yemot_path IS NOT NULL AND m.synced_version=m.version
+    ${unreadFilter}
+    ORDER BY m.id LIMIT 20`;
   let cursor = 0;
   while (true) {
-    const params = [user.id, cursor];
-    const messages = await rows(
-      `SELECT m.*,u.name FROM messages m JOIN users u ON u.id=m.user_id LEFT JOIN phone_reads r ON r.message_id=m.id AND r.user_id=? WHERE m.id>? AND m.yemot_path IS NOT NULL AND m.synced_version=m.version ${onlyNew ? "AND r.message_id IS NULL" : ""} ORDER BY m.id LIMIT 20`,
-      params,
-    );
+    const messages = await rows(query, onlyNew ? [cursor, user.id] : [cursor]);
     if (!messages.length) {
       call.id_list_message(text("אֵין הוֹדָעוֹת נוֹסָפוֹת"), {
         prependToNextAction: true,
