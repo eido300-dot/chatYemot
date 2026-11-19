@@ -100,8 +100,16 @@ test("authentication, origin and CSRF", async () => {
   );
   assert.equal(login.status, 200);
   cookie = login.headers.get("set-cookie").split(";")[0];
-  csrf = (await login.json()).csrf;
-  assert.match(login.headers.get("set-cookie"), /HttpOnly/);
+  const session = await login.json();
+  csrf = session.csrf;
+  assert.deepEqual(session.user, { id: alice.id, name: "אליס", admin: false, last_read: 0 });
+  assert.match(csrf, /^[a-f0-9]{64}$/);
+  const setCookie = login.headers.get("set-cookie");
+  assert.match(setCookie, /HttpOnly/);
+  assert.match(setCookie, /SameSite=Strict/);
+  assert.match(setCookie, /Path=\//);
+  assert.match(setCookie, /Max-Age=604800/);
+  assert.deepEqual(await (await request("/api/me")).json(), session);
   const blocked = await fetch(base + "/api/messages", {
     method: "POST",
     headers: {
@@ -112,6 +120,28 @@ test("authentication, origin and CSRF", async () => {
     body: '{"body":"blocked"}',
   });
   assert.equal(blocked.status, 403);
+});
+test("session authorization rejects expired and disabled sessions", async () => {
+  const login = await request(
+    "/api/login",
+    "POST",
+    { username: "bob", password: "test-password-123" },
+    false,
+  );
+  assert.equal(login.status, 200);
+  const headers = { Cookie: login.headers.get("set-cookie").split(";")[0] };
+  const me = () => fetch(base + "/api/me", { headers });
+  assert.equal((await me()).status, 200);
+
+  await rows("UPDATE users SET active=FALSE WHERE id=?", [bob.id]);
+  try {
+    assert.equal((await me()).status, 401);
+  } finally {
+    await rows("UPDATE users SET active=TRUE WHERE id=?", [bob.id]);
+  }
+  assert.equal((await me()).status, 200);
+  await rows("UPDATE sessions SET expires_at=NOW() WHERE user_id=?", [bob.id]);
+  assert.equal((await me()).status, 401);
 });
 test("CLI and login share the 12–256 character password policy", async () => {
   const run = promisify(execFile);
@@ -428,6 +458,8 @@ test("rejects arbitrary push hosts and tracks reads", async () => {
   assert.equal((await (await request("/api/me")).json()).user.last_read, id);
 });
 test("logout invalidates session", async () => {
-  assert.equal((await request("/api/logout", "POST")).status, 200);
+  const logout = await request("/api/logout", "POST");
+  assert.equal(logout.status, 200);
+  assert.match(logout.headers.get("set-cookie"), /^session=; Path=\//);
   assert.equal((await request("/api/me")).status, 401);
 });
