@@ -2,7 +2,7 @@ import webpush from "web-push";
 import { writeFile, unlink, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db, rows, transaction } from "./db.js";
-import { enqueue } from "./messages.js";
+import { enqueue, enqueueMany } from "./messages.js";
 import { config } from "./config.js";
 import { random, validSubscription } from "./security.js";
 import { convert, mediaPath } from "./media.js";
@@ -76,9 +76,11 @@ export function createWorker(adapters = {}) {
           "UPDATE messages SET media=?,yemot_path=?,synced_version=version WHERE id=?",
           [media, job.payload, m.id],
         );
-        await enqueue(c, "push", m.id, 1);
-        await enqueue(c, "tzintuk", m.id, 1);
-        await enqueue(c, "transcribe", m.id, 1);
+        await enqueueMany(c, m.id, 1, [
+          { type: "push" },
+          { type: "tzintuk" },
+          { type: "transcribe" },
+        ]);
       });
     }
     if (job.type === "tzintuk") {
