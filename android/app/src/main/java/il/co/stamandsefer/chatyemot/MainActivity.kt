@@ -141,12 +141,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun registerForPush() {
         fun say(m: String) = runOnUiThread { android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_LONG).show() }
+        say("בודק רישום התראות...")
         runCatching {
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnSuccessListener { t ->
                     Thread {
                         val err = Api.registerFcmToken(applicationContext, t)
-                        if (err != null) say("רישום התראות נכשל: $err")
+                        say(if (err != null) "רישום התראות נכשל: $err" else "התראות נרשמו בהצלחה")
                     }.start()
                 }
                 .addOnFailureListener { e -> say("טוקן התראות לא התקבל: ${e.message}") }
@@ -178,7 +179,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         Notifier.appVisible = true
         webView.onResume()
-        if (Api.loggedIn()) registerForPush()
+        if (Api.loggedIn()) registerForPush() else android.widget.Toast.makeText(this, "לא זוהתה עוגיית כניסה", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     override fun onPause() {
