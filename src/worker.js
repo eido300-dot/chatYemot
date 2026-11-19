@@ -1,5 +1,5 @@
 import webpush from "web-push";
-import { writeFile, unlink } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { db, rows, transaction } from "./db.js";
 import { enqueue } from "./messages.js";
@@ -66,7 +66,7 @@ export function createWorker(adapters = {}) {
       const temp = path.join(config.data, "tmp", random());
       let media;
       try {
-        await writeFile(temp, await remote.download(job.payload));
+        await remote.download(job.payload, temp);
         media = await convert(temp);
       } finally {
         await unlink(temp).catch(() => {});
