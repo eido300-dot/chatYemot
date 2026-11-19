@@ -14,8 +14,19 @@ object Api {
     @Volatile var myId = -1L
 
     fun loggedIn() = cookie() != null
-    private fun cookie() =
-        CookieManager.getInstance().getCookie(BuildConfig.SERVER_URL)?.takeIf { it.contains("session=") }
+    private fun cookie(): String? {
+        val cm = CookieManager.getInstance()
+        for (u in listOf(BuildConfig.SERVER_URL, base, base + "/api/me", base.substringBefore("/", "") + "//" + java.net.URI(base).host + "/")) {
+            val c = cm.getCookie(u)
+            if (c != null && c.contains("session=")) return c
+        }
+        return null
+    }
+
+    /** לאבחון: שמות העוגיות שה-WebView מחזיק לכתובת השרת. */
+    fun cookieNames(): String =
+        CookieManager.getInstance().getCookie(BuildConfig.SERVER_URL)
+            ?.split(";")?.joinToString(",") { it.substringBefore("=").trim() } ?: "אין"
 
     fun open(method: String, path: String, body: String? = null): HttpURLConnection {
         val c = URL(base + path).openConnection() as HttpURLConnection

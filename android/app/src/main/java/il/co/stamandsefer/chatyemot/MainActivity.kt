@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         Notifier.appVisible = true
         webView.onResume()
-        if (Api.loggedIn()) registerForPush() else android.widget.Toast.makeText(this, "לא זוהתה עוגיית כניסה", android.widget.Toast.LENGTH_SHORT).show()
+        if (Api.loggedIn()) registerForPush() else android.widget.Toast.makeText(this, "לא זוהתה עוגיית כניסה. עוגיות: ${Api.cookieNames()}", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     override fun onPause() {
